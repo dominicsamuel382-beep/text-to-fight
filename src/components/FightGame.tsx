@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { sfx, unlockAudio, setMuted, isMuted } from "@/lib/chiptune";
 
 type MoveType = "punch" | "kick" | "block" | "dodge" | "aerial" | "special";
 type Fighter = "player" | "enemy";
@@ -231,6 +232,8 @@ export function FightGame() {
   const [sparks, setSparks] = useState<Spark[]>([]);
   const [flash, setFlash] = useState<string | null>(null);
   const idRef = useRef(0);
+  const healthWarnRef = useRef(false);
+  const [audioMuted, setAudioMuted] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const poseTimerRef = useRef<number | null>(null);
@@ -240,6 +243,16 @@ export function FightGame() {
   useEffect(() => {
     if (phase === "fight") inputRef.current?.focus();
   }, [phase, currentMove]);
+
+  // Health-low warning beep
+  useEffect(() => {
+    if (phase !== "fight") return;
+    if (playerHp > 0 && playerHp <= 25 && !healthWarnRef.current) {
+      healthWarnRef.current = true;
+      sfx.healthWarn();
+    }
+    if (playerHp > 25) healthWarnRef.current = false;
+  }, [playerHp, phase]);
 
   const addFloat = useCallback((text: string, side: "left" | "right", color: string, size = 32) => {
     const id = ++idRef.current;
@@ -309,12 +322,15 @@ export function FightGame() {
           addFloat(`-${Math.round(dmg)}`, "left", "var(--hp-red)", 28);
           triggerShake(1);
           setCombo(0);
+          sfx.hitHeavy();
         } else if (defensePose === "dodge") {
           addFloat("DODGE!", "left", "var(--neon-purple)", 28);
+          sfx.dodge();
         } else if (defensePose === "block") {
           addFloat("BLOCK!", "left", "var(--neon-cyan)", 26);
           addFloat(`-${Math.round(dmg)}`, "left", "var(--hp-red)", 22);
           setPlayerHp(hp => Math.max(0, hp - Math.round(dmg)));
+          sfx.block();
         }
         setEnemyIncoming(null);
         setDefensePose(null);
@@ -337,6 +353,8 @@ export function FightGame() {
       setSlowmo(true);
       setFlash("K.O.");
       triggerShake(1);
+      sfx.koFlash();
+      setTimeout(() => sfx.victory(), 700);
       setTimeout(() => {
         setSlowmo(false);
         setFlash(null);
@@ -347,6 +365,8 @@ export function FightGame() {
       setSlowmo(true);
       setFlash("DEFEAT");
       triggerShake(1);
+      sfx.koFlash();
+      setTimeout(() => sfx.gameOver(), 700);
       setTimeout(() => {
         setSlowmo(false);
         setFlash(null);
@@ -371,10 +391,14 @@ export function FightGame() {
       setTyped("");
       // pick new word to keep flow moving
       setCurrentMove(generateMove());
+      sfx.typeMiss();
       return;
     }
 
     setTyped(val);
+
+    // key click on progress
+    if (val.length > typed.length && val !== target) sfx.typeKey();
 
     if (val === target) {
       // Executed move
@@ -384,6 +408,7 @@ export function FightGame() {
         setDefensePose(currentMove.type as "block" | "dodge");
         setPose("player", currentMove.type, 500);
         addFloat(currentMove.type.toUpperCase() + "!", "left", currentMove.color, 24);
+        if (currentMove.type === "block") sfx.block(); else sfx.dodge();
       } else {
         // damage enemy
         const comboMult = 1 + combo * 0.05;
@@ -399,7 +424,12 @@ export function FightGame() {
           if (isSpecial) {
             setSlowmo(true);
             setFlash("ULTIMATE!");
+            sfx.hitSpecial();
             setTimeout(() => { setSlowmo(false); setFlash(null); }, 800);
+          } else if (currentMove.type === "aerial" || currentMove.type === "kick") {
+            sfx.hitHeavy();
+          } else {
+            sfx.hitLight();
           }
         }, 120);
       }
@@ -407,11 +437,13 @@ export function FightGame() {
       const newCombo = combo + 1;
       setCombo(newCombo);
       setBest(b => Math.max(b, newCombo));
+      if (newCombo > 1 && newCombo % 3 === 0) sfx.combo(newCombo);
 
       // Meter fills; special uses meter
       let nextMeter = meter;
       if (isSpecial) nextMeter = 0;
       else nextMeter = Math.min(100, meter + (isDefense ? 4 : 8) + newCombo);
+      if (meter < 100 && nextMeter >= 100) sfx.meterFull();
       setMeter(nextMeter);
 
       setTyped("");
@@ -422,16 +454,29 @@ export function FightGame() {
   };
 
   const startFight = (d: Difficulty) => {
+    unlockAudio();
     setDifficulty(d);
     setPlayerHp(100); setEnemyHp(100);
     setCombo(0); setMeter(0);
+    healthWarnRef.current = false;
     setPlayerPose("idle"); setEnemyPose("idle");
     setCurrentMove(generateMove());
     setTyped("");
     setPhase("ready");
     setFlash("READY?");
-    setTimeout(() => setFlash("FIGHT!"), 900);
-    setTimeout(() => { setFlash(null); setPhase("fight"); }, 1700);
+    sfx.countdown();
+    setTimeout(() => sfx.countdown(), 400);
+    setTimeout(() => sfx.countdown(), 800);
+    setTimeout(() => { setFlash("FIGHT!"); sfx.roundStart(); }, 1200);
+    setTimeout(() => { setFlash(null); setPhase("fight"); }, 2000);
+  };
+
+  const toggleMute = () => {
+    unlockAudio();
+    const next = !audioMuted;
+    setAudioMuted(next);
+    setMuted(next);
+    if (!next) sfx.select();
   };
 
   const rematch = () => {
