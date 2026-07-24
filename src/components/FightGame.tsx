@@ -502,6 +502,12 @@ export function FightGame() {
 
       {/* Top HUD */}
       <header className="relative z-20 px-6 pt-5">
+        <button
+          onClick={toggleMute}
+          className="absolute right-6 top-5 z-30 text-[10px] tracking-[0.3em] border px-2 py-1 hover:opacity-100 opacity-70"
+          style={{ borderColor: "var(--neon-cyan)", color: "var(--neon-cyan)", background: "rgba(0,0,0,0.6)" }}
+          aria-label={audioMuted ? "Unmute" : "Mute"}
+        >{audioMuted ? "SOUND OFF" : "SOUND ON"}</button>
         <div className="flex items-center justify-between gap-6">
           <HealthBar hp={playerHp} max={100} label="YOU" side="left" combo={combo} meter={meter} />
           <div className="flex flex-col items-center px-3">
