@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sfx, unlockAudio, setMuted, isMuted } from "@/lib/chiptune";
+import { net, type NetMove } from "@/lib/net";
 
 type MoveType = "punch" | "kick" | "block" | "dodge" | "aerial" | "special";
 type Fighter = "player" | "enemy";
@@ -27,8 +28,6 @@ interface Spark {
   y: number;
   color: string;
 }
-
-type Difficulty = "rookie" | "brawler" | "master";
 
 const WORDS_SHORT = ["jab", "hit", "kick", "duck", "flip", "spin", "dash", "slam", "grab", "hook"];
 const WORDS_MED = ["combo", "strike", "uppercut", "sidestep", "counter", "parry", "smash", "impact"];
@@ -60,12 +59,6 @@ function generateMove(forceSpecial = false): Move {
   const cfg = MOVES[type];
   return { type, word: pick(cfg.pool), damage: cfg.damage, label: cfg.label, color: cfg.color };
 }
-
-const DIFFICULTY: Record<Difficulty, { interval: [number, number]; damageMult: number; label: string }> = {
-  rookie:  { interval: [1600, 2600], damageMult: 0.7, label: "ROOKIE" },
-  brawler: { interval: [1000, 1800], damageMult: 1.0, label: "BRAWLER" },
-  master:  { interval: [650, 1200],  damageMult: 1.35, label: "MASTER" },
-};
 
 // ---------- Fighter SVG ----------
 function FighterSprite({
@@ -208,8 +201,7 @@ function HealthBar({ hp, max, label, side, combo, meter }: { hp: number; max: nu
 
 // ---------- Main Game ----------
 export function FightGame() {
-  const [difficulty, setDifficulty] = useState<Difficulty>("brawler");
-  const [phase, setPhase] = useState<"menu" | "ready" | "fight" | "ko" | "victory">("menu");
+  const [phase, setPhase] = useState<"menu" | "waiting" | "ready" | "fight" | "ko" | "victory">("menu");
   const [round, setRound] = useState(1);
 
   const [playerHp, setPlayerHp] = useState(100);
@@ -222,8 +214,9 @@ export function FightGame() {
   const [typed, setTyped] = useState("");
   const [playerPose, setPlayerPose] = useState<"idle" | MoveType | "hurt" | "ko">("idle");
   const [enemyPose, setEnemyPose] = useState<"idle" | MoveType | "hurt" | "ko">("idle");
-  const [enemyAttackIn, setEnemyAttackIn] = useState<number>(2000);
   const [enemyIncoming, setEnemyIncoming] = useState<MoveType | null>(null);
+  const [enemyCombo, setEnemyCombo] = useState(0);
+  const [enemyMeter, setEnemyMeter] = useState(0);
   const [defensePose, setDefensePose] = useState<"block" | "dodge" | null>(null);
 
   const [shake, setShake] = useState(0);
@@ -236,6 +229,11 @@ export function FightGame() {
   const [audioMuted, setAudioMuted] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const defensePoseRef = useRef<"block" | "dodge" | null>(null);
+  const phaseRef = useRef(phase);
+  const windupSentRef = useRef(false);
+  useEffect(() => { defensePoseRef.current = defensePose; }, [defensePose]);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
   const poseTimerRef = useRef<number | null>(null);
   const enemyPoseTimerRef = useRef<number | null>(null);
 
@@ -291,59 +289,70 @@ export function FightGame() {
     }
   }, []);
 
-  // Enemy attack loop
+  // ---- Multiplayer: apply incoming opponent events ----
   useEffect(() => {
-    if (phase !== "fight") return;
-    let cancelled = false;
-    const [lo, hi] = DIFFICULTY[difficulty].interval;
-    const delay = lo + Math.random() * (hi - lo);
-    setEnemyAttackIn(delay);
-    const warnAt = Math.max(600, delay - 700);
-    const warnT = window.setTimeout(() => {
-      if (cancelled) return;
-      const type: MoveType = Math.random() < 0.3 ? "kick" : Math.random() < 0.5 ? "aerial" : "punch";
-      setEnemyIncoming(type);
-    }, warnAt);
-    const t = window.setTimeout(() => {
-      if (cancelled) return;
-      // enemy attacks
-      const type = enemyIncoming ?? "punch";
-      setPose("enemy", type, 350);
-      const base = MOVES[type].damage * DIFFICULTY[difficulty].damageMult;
-      // Check defense
-      let dmg = base;
-      if (defensePose === "block") dmg = base * 0.15;
-      else if (defensePose === "dodge") dmg = 0;
-      setTimeout(() => {
-        addSpark("left", defensePose === "block" ? "var(--neon-cyan)" : "var(--neon-yellow)");
+    const offStart = net.on("match:start", () => {
+      // Server confirms both players are in — begin countdown.
+      beginCountdown();
+    });
+    const offWindup = net.on("opponent:windup", ({ move }) => {
+      if (phaseRef.current !== "fight") return;
+      setEnemyIncoming(move);
+    });
+    const offAttack = net.on("opponent:attack", ({ move, damage }) => {
+      if (phaseRef.current !== "fight") return;
+      setPose("enemy", move, 350);
+      const guard = defensePoseRef.current;
+      let dmg = damage;
+      if (guard === "block") dmg = damage * 0.15;
+      else if (guard === "dodge") dmg = 0;
+      window.setTimeout(() => {
+        addSpark("left", guard === "block" ? "var(--neon-cyan)" : "var(--neon-yellow)");
         if (dmg > 0) {
-          setPlayerHp(hp => Math.max(0, hp - Math.round(dmg)));
+          setPlayerHp(hp => {
+            const next = Math.max(0, hp - Math.round(dmg));
+            net.emit("opponent:hp", { hp: next });
+            return next;
+          });
           setPose("player", "hurt", 300);
           addFloat(`-${Math.round(dmg)}`, "left", "var(--hp-red)", 28);
           triggerShake(1);
           setCombo(0);
           sfx.hitHeavy();
-        } else if (defensePose === "dodge") {
+        } else if (guard === "dodge") {
           addFloat("DODGE!", "left", "var(--neon-purple)", 28);
           sfx.dodge();
-        } else if (defensePose === "block") {
+        } else if (guard === "block") {
           addFloat("BLOCK!", "left", "var(--neon-cyan)", 26);
-          addFloat(`-${Math.round(dmg)}`, "left", "var(--hp-red)", 22);
-          setPlayerHp(hp => Math.max(0, hp - Math.round(dmg)));
           sfx.block();
         }
         setEnemyIncoming(null);
         setDefensePose(null);
       }, 180);
-    }, delay);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(t);
-      window.clearTimeout(warnT);
-    };
-    // key deps: refresh whenever these change
+    });
+    const offHp = net.on("opponent:hp", ({ hp }) => setEnemyHp(hp));
+    const offStats = net.on("opponent:stats", ({ combo: c, meter: m }) => {
+      setEnemyCombo(c);
+      setEnemyMeter(m);
+    });
+    const offMiss = net.on("opponent:miss", () => {
+      setPose("enemy", "hurt", 180);
+    });
+    const offDisc = net.on("opponent:disconnect", () => {
+      if (phaseRef.current === "fight" || phaseRef.current === "waiting") {
+        setFlash("OPPONENT LEFT");
+        window.setTimeout(() => { setFlash(null); setPhase("menu"); }, 1500);
+      }
+    });
+    return () => { offStart(); offWindup(); offAttack(); offHp(); offStats(); offMiss(); offDisc(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, difficulty, enemyHp, playerHp, round]);
+  }, []);
+
+  // Broadcast own combo/meter so opponent's HUD stays in sync.
+  useEffect(() => {
+    if (phase !== "fight") return;
+    net.emit("opponent:stats", { combo, meter });
+  }, [combo, meter, phase]);
 
   // KO detection
   useEffect(() => {
@@ -391,6 +400,10 @@ export function FightGame() {
       setTyped("");
       // pick new word to keep flow moving
       setCurrentMove(generateMove());
+      windupSentRef.current = false;
+      net.emit("opponent:miss");
+      // stumble also costs HP — sync it
+      setPlayerHp(hp => { net.emit("opponent:hp", { hp }); return hp; });
       sfx.typeMiss();
       return;
     }
@@ -399,6 +412,15 @@ export function FightGame() {
 
     // key click on progress
     if (val.length > typed.length && val !== target) sfx.typeKey();
+
+    // Telegraph an incoming attack to the opponent on the first correct keystroke.
+    if (val.length === 1 && !windupSentRef.current) {
+      const t = currentMove.type;
+      if (t === "punch" || t === "kick" || t === "aerial" || t === "special") {
+        windupSentRef.current = true;
+        net.emit("opponent:windup", { move: t as NetMove });
+      }
+    }
 
     if (val === target) {
       // Executed move
@@ -410,12 +432,13 @@ export function FightGame() {
         addFloat(currentMove.type.toUpperCase() + "!", "left", currentMove.color, 24);
         if (currentMove.type === "block") sfx.block(); else sfx.dodge();
       } else {
-        // damage enemy
+        // damage enemy — send authoritative attack over the wire; the opponent
+        // applies their defense modifier and echoes back their new HP.
         const comboMult = 1 + combo * 0.05;
         const dmg = Math.round(currentMove.damage * comboMult);
+        net.emit("opponent:attack", { move: currentMove.type as NetMove, damage: dmg });
         setPose("player", currentMove.type, 300);
         setTimeout(() => {
-          setEnemyHp(hp => Math.max(0, hp - dmg));
           setPose("enemy", "hurt", 250);
           addSpark("right", currentMove.color);
           addFloat(`-${dmg}`, "right", "var(--neon-yellow)", isSpecial ? 44 : 30);
@@ -450,16 +473,18 @@ export function FightGame() {
       // Auto-serve special if meter is full and combo >= 5
       const forceSpecial = nextMeter >= 100 && newCombo >= 3 && Math.random() < 0.5;
       setCurrentMove(generateMove(forceSpecial));
+      windupSentRef.current = false;
     }
   };
 
-  const startFight = (d: Difficulty) => {
-    unlockAudio();
-    setDifficulty(d);
+  // Reset local state, then run the READY? / FIGHT! countdown.
+  const beginCountdown = useCallback(() => {
     setPlayerHp(100); setEnemyHp(100);
     setCombo(0); setMeter(0);
+    setEnemyCombo(0); setEnemyMeter(0);
     healthWarnRef.current = false;
     setPlayerPose("idle"); setEnemyPose("idle");
+    setEnemyIncoming(null); setDefensePose(null);
     setCurrentMove(generateMove());
     setTyped("");
     setPhase("ready");
@@ -469,6 +494,14 @@ export function FightGame() {
     setTimeout(() => sfx.countdown(), 800);
     setTimeout(() => { setFlash("FIGHT!"); sfx.roundStart(); }, 1200);
     setTimeout(() => { setFlash(null); setPhase("fight"); }, 2000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const findMatch = () => {
+    unlockAudio();
+    net.connect();
+    net.ready();
+    setPhase("waiting");
   };
 
   const toggleMute = () => {
@@ -481,7 +514,7 @@ export function FightGame() {
 
   const rematch = () => {
     setRound(r => r + 1);
-    startFight(difficulty);
+    findMatch();
   };
 
   // Progress bar for current word
@@ -513,9 +546,9 @@ export function FightGame() {
           <div className="flex flex-col items-center px-3">
             <div className="text-[10px] tracking-[0.3em] opacity-70">ROUND</div>
             <div className="text-4xl font-black" style={{ color: "var(--neon-yellow)", textShadow: "0 0 12px var(--neon-yellow)" }}>{round.toString().padStart(2, "0")}</div>
-            <div className="text-[10px] tracking-[0.3em] opacity-70 mt-1">{DIFFICULTY[difficulty].label}</div>
+            <div className="text-[10px] tracking-[0.3em] opacity-70 mt-1">ONLINE</div>
           </div>
-          <HealthBar hp={enemyHp} max={100} label="A.I." side="right" combo={0} meter={enemyHp} />
+          <HealthBar hp={enemyHp} max={100} label="OPP" side="right" combo={enemyCombo} meter={enemyMeter} />
         </div>
       </header>
 
@@ -625,7 +658,7 @@ export function FightGame() {
             className="sr-only"
           />
         </div>
-        <p className="text-center text-xs opacity-60 mt-3 tracking-widest">TYPE THE WORD TO ATTACK · BLOCK/DODGE WHEN A.I. WINDS UP · CHAIN COMBOS FOR ULTIMATES</p>
+        <p className="text-center text-xs opacity-60 mt-3 tracking-widest">TYPE THE WORD TO ATTACK · BLOCK/DODGE WHEN OPPONENT WINDS UP · CHAIN COMBOS FOR ULTIMATES</p>
       </footer>
 
       {/* Menu / overlays */}
@@ -633,28 +666,38 @@ export function FightGame() {
         <Overlay>
           <Title />
           <div className="mt-8 flex flex-col items-center gap-3">
-            <div className="text-xs tracking-[0.4em] opacity-70">SELECT DIFFICULTY</div>
-            <div className="flex gap-3">
-              {(["rookie", "brawler", "master"] as Difficulty[]).map(d => (
-                <button
-                  key={d}
-                  onClick={() => { sfx.select(); startFight(d); }}
-                  onMouseEnter={() => sfx.cursor()}
-                  className="px-6 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform"
-                  style={{
-                    borderColor: d === "master" ? "var(--neon-pink)" : d === "brawler" ? "var(--neon-yellow)" : "var(--neon-cyan)",
-                    color: d === "master" ? "var(--neon-pink)" : d === "brawler" ? "var(--neon-yellow)" : "var(--neon-cyan)",
-                    background: "rgba(0,0,0,0.6)",
-                    boxShadow: `0 0 20px ${d === "master" ? "var(--neon-pink)" : d === "brawler" ? "var(--neon-yellow)" : "var(--neon-cyan)"}`,
-                  }}
-                >
-                  {DIFFICULTY[d].label}
-                </button>
-              ))}
-            </div>
+            <div className="text-xs tracking-[0.4em] opacity-70">1 v 1 ONLINE</div>
+            <button
+              onClick={() => { sfx.select(); findMatch(); }}
+              onMouseEnter={() => sfx.cursor()}
+              className="px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform"
+              style={{
+                borderColor: "var(--neon-pink)",
+                color: "var(--neon-pink)",
+                background: "rgba(0,0,0,0.6)",
+                boxShadow: "0 0 20px var(--neon-pink)",
+              }}
+            >
+              FIND MATCH
+            </button>
             <p className="mt-6 max-w-md text-center text-sm opacity-70 leading-relaxed">
-              Every keystroke is a strike. Type <span style={{ color: "var(--neon-cyan)" }}>attack words</span> to unleash punches, kicks and aerials. Type <span style={{ color: "var(--neon-purple)" }}>BLOCK</span> or <span style={{ color: "var(--neon-purple)" }}>DODGE</span> to counter incoming attacks. Chain hits for ultimates.
+              Every keystroke is a strike. Type <span style={{ color: "var(--neon-cyan)" }}>attack words</span> to unleash punches, kicks and aerials. Type <span style={{ color: "var(--neon-purple)" }}>BLOCK</span> or <span style={{ color: "var(--neon-purple)" }}>DODGE</span> to counter your opponent's incoming attacks. Chain hits for ultimates.
             </p>
+          </div>
+        </Overlay>
+      )}
+
+      {phase === "waiting" && (
+        <Overlay>
+          <Title />
+          <div className="mt-8 flex flex-col items-center gap-3">
+            <div className="text-lg tracking-[0.4em] animate-pulse" style={{ color: "var(--neon-cyan)", textShadow: "0 0 12px currentColor" }}>
+              SEARCHING FOR OPPONENT…
+            </div>
+            <button
+              onClick={() => { sfx.back(); net.disconnect(); setPhase("menu"); }}
+              className="mt-6 text-xs opacity-70 tracking-widest hover:opacity-100"
+            >CANCEL</button>
           </div>
         </Overlay>
       )}
@@ -664,7 +707,7 @@ export function FightGame() {
           <div className="text-6xl font-black tracking-widest mb-4" style={{ color: "var(--neon-yellow)", textShadow: "0 0 20px currentColor" }}>VICTORY</div>
           <div className="text-sm tracking-widest opacity-80">BEST COMBO · {best}</div>
           <button onClick={() => { sfx.select(); rematch(); }} onMouseEnter={() => sfx.cursor()} className="mt-8 px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform" style={{ borderColor: "var(--neon-pink)", color: "var(--neon-pink)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 20px var(--neon-pink)" }}>REMATCH</button>
-          <button onClick={() => { sfx.back(); setPhase("menu"); }} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">CHANGE DIFFICULTY</button>
+          <button onClick={() => { sfx.back(); setPhase("menu"); }} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">LEAVE MATCH</button>
         </Overlay>
       )}
 
@@ -673,7 +716,7 @@ export function FightGame() {
           <div className="text-6xl font-black tracking-widest mb-4" style={{ color: "var(--hp-red)", textShadow: "0 0 20px currentColor" }}>YOU LOSE</div>
           <div className="text-sm tracking-widest opacity-80">BEST COMBO · {best}</div>
           <button onClick={() => { sfx.select(); rematch(); }} onMouseEnter={() => sfx.cursor()} className="mt-8 px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform" style={{ borderColor: "var(--neon-cyan)", color: "var(--neon-cyan)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 20px var(--neon-cyan)" }}>TRY AGAIN</button>
-          <button onClick={() => { sfx.back(); setPhase("menu"); }} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">CHANGE DIFFICULTY</button>
+          <button onClick={() => { sfx.back(); setPhase("menu"); }} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">LEAVE MATCH</button>
         </Overlay>
       )}
     </main>
@@ -685,7 +728,7 @@ function Title() {
     <div className="flex flex-col items-center">
       <div className="text-xs tracking-[0.5em] opacity-70">NEON DOJO PRESENTS</div>
       <h1 className="text-7xl md:text-8xl font-black tracking-[0.1em] mt-2 animate-neon" style={{ color: "var(--neon-pink)" }}>KEYSTRIKE</h1>
-      <div className="mt-2 text-sm tracking-[0.4em]" style={{ color: "var(--neon-cyan)" }}>TYPING FIGHTER · 1 v A.I.</div>
+      <div className="mt-2 text-sm tracking-[0.4em]" style={{ color: "var(--neon-cyan)" }}>TYPING FIGHTER · 1 v 1 ONLINE</div>
     </div>
   );
 }
