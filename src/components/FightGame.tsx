@@ -632,7 +632,8 @@ export function FightGame() {
               {(["rookie", "brawler", "master"] as Difficulty[]).map(d => (
                 <button
                   key={d}
-                  onClick={() => startFight(d)}
+                  onClick={() => { sfx.select(); startFight(d); }}
+                  onMouseEnter={() => sfx.cursor()}
                   className="px-6 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform"
                   style={{
                     borderColor: d === "master" ? "var(--neon-pink)" : d === "brawler" ? "var(--neon-yellow)" : "var(--neon-cyan)",
@@ -656,8 +657,8 @@ export function FightGame() {
         <Overlay>
           <div className="text-6xl font-black tracking-widest mb-4" style={{ color: "var(--neon-yellow)", textShadow: "0 0 20px currentColor" }}>VICTORY</div>
           <div className="text-sm tracking-widest opacity-80">BEST COMBO · {best}</div>
-          <button onClick={rematch} className="mt-8 px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform" style={{ borderColor: "var(--neon-pink)", color: "var(--neon-pink)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 20px var(--neon-pink)" }}>REMATCH</button>
-          <button onClick={() => setPhase("menu")} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">CHANGE DIFFICULTY</button>
+          <button onClick={() => { sfx.select(); rematch(); }} onMouseEnter={() => sfx.cursor()} className="mt-8 px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform" style={{ borderColor: "var(--neon-pink)", color: "var(--neon-pink)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 20px var(--neon-pink)" }}>REMATCH</button>
+          <button onClick={() => { sfx.back(); setPhase("menu"); }} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">CHANGE DIFFICULTY</button>
         </Overlay>
       )}
 
@@ -665,8 +666,8 @@ export function FightGame() {
         <Overlay>
           <div className="text-6xl font-black tracking-widest mb-4" style={{ color: "var(--hp-red)", textShadow: "0 0 20px currentColor" }}>YOU LOSE</div>
           <div className="text-sm tracking-widest opacity-80">BEST COMBO · {best}</div>
-          <button onClick={rematch} className="mt-8 px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform" style={{ borderColor: "var(--neon-cyan)", color: "var(--neon-cyan)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 20px var(--neon-cyan)" }}>TRY AGAIN</button>
-          <button onClick={() => setPhase("menu")} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">CHANGE DIFFICULTY</button>
+          <button onClick={() => { sfx.select(); rematch(); }} onMouseEnter={() => sfx.cursor()} className="mt-8 px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform" style={{ borderColor: "var(--neon-cyan)", color: "var(--neon-cyan)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 20px var(--neon-cyan)" }}>TRY AGAIN</button>
+          <button onClick={() => { sfx.back(); setPhase("menu"); }} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">CHANGE DIFFICULTY</button>
         </Overlay>
       )}
     </main>
