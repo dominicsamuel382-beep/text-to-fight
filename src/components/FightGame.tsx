@@ -728,7 +728,7 @@ function Title() {
     <div className="flex flex-col items-center">
       <div className="text-xs tracking-[0.5em] opacity-70">NEON DOJO PRESENTS</div>
       <h1 className="text-7xl md:text-8xl font-black tracking-[0.1em] mt-2 animate-neon" style={{ color: "var(--neon-pink)" }}>KEYSTRIKE</h1>
-      <div className="mt-2 text-sm tracking-[0.4em]" style={{ color: "var(--neon-cyan)" }}>TYPING FIGHTER · 1 v A.I.</div>
+      <div className="mt-2 text-sm tracking-[0.4em]" style={{ color: "var(--neon-cyan)" }}>TYPING FIGHTER · 1 v 1 ONLINE</div>
     </div>
   );
 }
