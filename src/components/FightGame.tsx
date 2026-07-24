@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sfx, unlockAudio, setMuted, isMuted } from "@/lib/chiptune";
+import { net, type NetMove } from "@/lib/net";
 
 type MoveType = "punch" | "kick" | "block" | "dodge" | "aerial" | "special";
 type Fighter = "player" | "enemy";
@@ -27,8 +28,6 @@ interface Spark {
   y: number;
   color: string;
 }
-
-type Difficulty = "rookie" | "brawler" | "master";
 
 const WORDS_SHORT = ["jab", "hit", "kick", "duck", "flip", "spin", "dash", "slam", "grab", "hook"];
 const WORDS_MED = ["combo", "strike", "uppercut", "sidestep", "counter", "parry", "smash", "impact"];
@@ -60,12 +59,6 @@ function generateMove(forceSpecial = false): Move {
   const cfg = MOVES[type];
   return { type, word: pick(cfg.pool), damage: cfg.damage, label: cfg.label, color: cfg.color };
 }
-
-const DIFFICULTY: Record<Difficulty, { interval: [number, number]; damageMult: number; label: string }> = {
-  rookie:  { interval: [1600, 2600], damageMult: 0.7, label: "ROOKIE" },
-  brawler: { interval: [1000, 1800], damageMult: 1.0, label: "BRAWLER" },
-  master:  { interval: [650, 1200],  damageMult: 1.35, label: "MASTER" },
-};
 
 // ---------- Fighter SVG ----------
 function FighterSprite({
