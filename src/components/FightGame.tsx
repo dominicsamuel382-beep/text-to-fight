@@ -289,59 +289,70 @@ export function FightGame() {
     }
   }, []);
 
-  // Enemy attack loop
+  // ---- Multiplayer: apply incoming opponent events ----
   useEffect(() => {
-    if (phase !== "fight") return;
-    let cancelled = false;
-    const [lo, hi] = DIFFICULTY[difficulty].interval;
-    const delay = lo + Math.random() * (hi - lo);
-    setEnemyAttackIn(delay);
-    const warnAt = Math.max(600, delay - 700);
-    const warnT = window.setTimeout(() => {
-      if (cancelled) return;
-      const type: MoveType = Math.random() < 0.3 ? "kick" : Math.random() < 0.5 ? "aerial" : "punch";
-      setEnemyIncoming(type);
-    }, warnAt);
-    const t = window.setTimeout(() => {
-      if (cancelled) return;
-      // enemy attacks
-      const type = enemyIncoming ?? "punch";
-      setPose("enemy", type, 350);
-      const base = MOVES[type].damage * DIFFICULTY[difficulty].damageMult;
-      // Check defense
-      let dmg = base;
-      if (defensePose === "block") dmg = base * 0.15;
-      else if (defensePose === "dodge") dmg = 0;
-      setTimeout(() => {
-        addSpark("left", defensePose === "block" ? "var(--neon-cyan)" : "var(--neon-yellow)");
+    const offStart = net.on("match:start", () => {
+      // Server confirms both players are in — begin countdown.
+      beginCountdown();
+    });
+    const offWindup = net.on("opponent:windup", ({ move }) => {
+      if (phaseRef.current !== "fight") return;
+      setEnemyIncoming(move);
+    });
+    const offAttack = net.on("opponent:attack", ({ move, damage }) => {
+      if (phaseRef.current !== "fight") return;
+      setPose("enemy", move, 350);
+      const guard = defensePoseRef.current;
+      let dmg = damage;
+      if (guard === "block") dmg = damage * 0.15;
+      else if (guard === "dodge") dmg = 0;
+      window.setTimeout(() => {
+        addSpark("left", guard === "block" ? "var(--neon-cyan)" : "var(--neon-yellow)");
         if (dmg > 0) {
-          setPlayerHp(hp => Math.max(0, hp - Math.round(dmg)));
+          setPlayerHp(hp => {
+            const next = Math.max(0, hp - Math.round(dmg));
+            net.emit("opponent:hp", { hp: next });
+            return next;
+          });
           setPose("player", "hurt", 300);
           addFloat(`-${Math.round(dmg)}`, "left", "var(--hp-red)", 28);
           triggerShake(1);
           setCombo(0);
           sfx.hitHeavy();
-        } else if (defensePose === "dodge") {
+        } else if (guard === "dodge") {
           addFloat("DODGE!", "left", "var(--neon-purple)", 28);
           sfx.dodge();
-        } else if (defensePose === "block") {
+        } else if (guard === "block") {
           addFloat("BLOCK!", "left", "var(--neon-cyan)", 26);
-          addFloat(`-${Math.round(dmg)}`, "left", "var(--hp-red)", 22);
-          setPlayerHp(hp => Math.max(0, hp - Math.round(dmg)));
           sfx.block();
         }
         setEnemyIncoming(null);
         setDefensePose(null);
       }, 180);
-    }, delay);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(t);
-      window.clearTimeout(warnT);
-    };
-    // key deps: refresh whenever these change
+    });
+    const offHp = net.on("opponent:hp", ({ hp }) => setEnemyHp(hp));
+    const offStats = net.on("opponent:stats", ({ combo: c, meter: m }) => {
+      setEnemyCombo(c);
+      setEnemyMeter(m);
+    });
+    const offMiss = net.on("opponent:miss", () => {
+      setPose("enemy", "hurt", 180);
+    });
+    const offDisc = net.on("opponent:disconnect", () => {
+      if (phaseRef.current === "fight" || phaseRef.current === "waiting") {
+        setFlash("OPPONENT LEFT");
+        window.setTimeout(() => { setFlash(null); setPhase("menu"); }, 1500);
+      }
+    });
+    return () => { offStart(); offWindup(); offAttack(); offHp(); offStats(); offMiss(); offDisc(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, difficulty, enemyHp, playerHp, round]);
+  }, []);
+
+  // Broadcast own combo/meter so opponent's HUD stays in sync.
+  useEffect(() => {
+    if (phase !== "fight") return;
+    net.emit("opponent:stats", { combo, meter });
+  }, [combo, meter, phase]);
 
   // KO detection
   useEffect(() => {
