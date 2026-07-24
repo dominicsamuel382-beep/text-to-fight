@@ -1,24 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { FightGame } from "@/components/FightGame";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "KEYSTRIKE // Neon Typing Fighter" },
+      { name: "description", content: "A cyberpunk 1v1 typing fighting game. Type fast, land combos, unleash ultimates." },
+      { property: "og:title", content: "KEYSTRIKE // Neon Typing Fighter" },
+      { property: "og:description", content: "Type to punch, kick, block, and finish. Fight the AI in a neon arena." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
   component: Index,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
 function Index() {
-  return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
-    </div>
-  );
+  return <FightGame />;
 }
