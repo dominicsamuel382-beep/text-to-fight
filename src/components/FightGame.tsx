@@ -531,9 +531,9 @@ export function FightGame() {
           <div className="flex flex-col items-center px-3">
             <div className="text-[10px] tracking-[0.3em] opacity-70">ROUND</div>
             <div className="text-4xl font-black" style={{ color: "var(--neon-yellow)", textShadow: "0 0 12px var(--neon-yellow)" }}>{round.toString().padStart(2, "0")}</div>
-            <div className="text-[10px] tracking-[0.3em] opacity-70 mt-1">{DIFFICULTY[difficulty].label}</div>
+            <div className="text-[10px] tracking-[0.3em] opacity-70 mt-1">ONLINE</div>
           </div>
-          <HealthBar hp={enemyHp} max={100} label="A.I." side="right" combo={0} meter={enemyHp} />
+          <HealthBar hp={enemyHp} max={100} label="OPP" side="right" combo={enemyCombo} meter={enemyMeter} />
         </div>
       </header>
 
@@ -643,7 +643,7 @@ export function FightGame() {
             className="sr-only"
           />
         </div>
-        <p className="text-center text-xs opacity-60 mt-3 tracking-widest">TYPE THE WORD TO ATTACK · BLOCK/DODGE WHEN A.I. WINDS UP · CHAIN COMBOS FOR ULTIMATES</p>
+        <p className="text-center text-xs opacity-60 mt-3 tracking-widest">TYPE THE WORD TO ATTACK · BLOCK/DODGE WHEN OPPONENT WINDS UP · CHAIN COMBOS FOR ULTIMATES</p>
       </footer>
 
       {/* Menu / overlays */}
@@ -651,28 +651,38 @@ export function FightGame() {
         <Overlay>
           <Title />
           <div className="mt-8 flex flex-col items-center gap-3">
-            <div className="text-xs tracking-[0.4em] opacity-70">SELECT DIFFICULTY</div>
-            <div className="flex gap-3">
-              {(["rookie", "brawler", "master"] as Difficulty[]).map(d => (
-                <button
-                  key={d}
-                  onClick={() => { sfx.select(); startFight(d); }}
-                  onMouseEnter={() => sfx.cursor()}
-                  className="px-6 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform"
-                  style={{
-                    borderColor: d === "master" ? "var(--neon-pink)" : d === "brawler" ? "var(--neon-yellow)" : "var(--neon-cyan)",
-                    color: d === "master" ? "var(--neon-pink)" : d === "brawler" ? "var(--neon-yellow)" : "var(--neon-cyan)",
-                    background: "rgba(0,0,0,0.6)",
-                    boxShadow: `0 0 20px ${d === "master" ? "var(--neon-pink)" : d === "brawler" ? "var(--neon-yellow)" : "var(--neon-cyan)"}`,
-                  }}
-                >
-                  {DIFFICULTY[d].label}
-                </button>
-              ))}
-            </div>
+            <div className="text-xs tracking-[0.4em] opacity-70">1 v 1 ONLINE</div>
+            <button
+              onClick={() => { sfx.select(); findMatch(); }}
+              onMouseEnter={() => sfx.cursor()}
+              className="px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform"
+              style={{
+                borderColor: "var(--neon-pink)",
+                color: "var(--neon-pink)",
+                background: "rgba(0,0,0,0.6)",
+                boxShadow: "0 0 20px var(--neon-pink)",
+              }}
+            >
+              FIND MATCH
+            </button>
             <p className="mt-6 max-w-md text-center text-sm opacity-70 leading-relaxed">
-              Every keystroke is a strike. Type <span style={{ color: "var(--neon-cyan)" }}>attack words</span> to unleash punches, kicks and aerials. Type <span style={{ color: "var(--neon-purple)" }}>BLOCK</span> or <span style={{ color: "var(--neon-purple)" }}>DODGE</span> to counter incoming attacks. Chain hits for ultimates.
+              Every keystroke is a strike. Type <span style={{ color: "var(--neon-cyan)" }}>attack words</span> to unleash punches, kicks and aerials. Type <span style={{ color: "var(--neon-purple)" }}>BLOCK</span> or <span style={{ color: "var(--neon-purple)" }}>DODGE</span> to counter your opponent's incoming attacks. Chain hits for ultimates.
             </p>
+          </div>
+        </Overlay>
+      )}
+
+      {phase === "waiting" && (
+        <Overlay>
+          <Title />
+          <div className="mt-8 flex flex-col items-center gap-3">
+            <div className="text-lg tracking-[0.4em] animate-pulse" style={{ color: "var(--neon-cyan)", textShadow: "0 0 12px currentColor" }}>
+              SEARCHING FOR OPPONENT…
+            </div>
+            <button
+              onClick={() => { sfx.back(); net.disconnect(); setPhase("menu"); }}
+              className="mt-6 text-xs opacity-70 tracking-widest hover:opacity-100"
+            >CANCEL</button>
           </div>
         </Overlay>
       )}
@@ -682,7 +692,7 @@ export function FightGame() {
           <div className="text-6xl font-black tracking-widest mb-4" style={{ color: "var(--neon-yellow)", textShadow: "0 0 20px currentColor" }}>VICTORY</div>
           <div className="text-sm tracking-widest opacity-80">BEST COMBO · {best}</div>
           <button onClick={() => { sfx.select(); rematch(); }} onMouseEnter={() => sfx.cursor()} className="mt-8 px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform" style={{ borderColor: "var(--neon-pink)", color: "var(--neon-pink)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 20px var(--neon-pink)" }}>REMATCH</button>
-          <button onClick={() => { sfx.back(); setPhase("menu"); }} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">CHANGE DIFFICULTY</button>
+          <button onClick={() => { sfx.back(); setPhase("menu"); }} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">LEAVE MATCH</button>
         </Overlay>
       )}
 
@@ -691,7 +701,7 @@ export function FightGame() {
           <div className="text-6xl font-black tracking-widest mb-4" style={{ color: "var(--hp-red)", textShadow: "0 0 20px currentColor" }}>YOU LOSE</div>
           <div className="text-sm tracking-widest opacity-80">BEST COMBO · {best}</div>
           <button onClick={() => { sfx.select(); rematch(); }} onMouseEnter={() => sfx.cursor()} className="mt-8 px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform" style={{ borderColor: "var(--neon-cyan)", color: "var(--neon-cyan)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 20px var(--neon-cyan)" }}>TRY AGAIN</button>
-          <button onClick={() => { sfx.back(); setPhase("menu"); }} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">CHANGE DIFFICULTY</button>
+          <button onClick={() => { sfx.back(); setPhase("menu"); }} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">LEAVE MATCH</button>
         </Overlay>
       )}
     </main>
