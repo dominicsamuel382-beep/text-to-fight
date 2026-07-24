@@ -462,13 +462,14 @@ export function FightGame() {
     }
   };
 
-  const startFight = (d: Difficulty) => {
-    unlockAudio();
-    setDifficulty(d);
+  // Reset local state, then run the READY? / FIGHT! countdown.
+  const beginCountdown = useCallback(() => {
     setPlayerHp(100); setEnemyHp(100);
     setCombo(0); setMeter(0);
+    setEnemyCombo(0); setEnemyMeter(0);
     healthWarnRef.current = false;
     setPlayerPose("idle"); setEnemyPose("idle");
+    setEnemyIncoming(null); setDefensePose(null);
     setCurrentMove(generateMove());
     setTyped("");
     setPhase("ready");
@@ -478,6 +479,14 @@ export function FightGame() {
     setTimeout(() => sfx.countdown(), 800);
     setTimeout(() => { setFlash("FIGHT!"); sfx.roundStart(); }, 1200);
     setTimeout(() => { setFlash(null); setPhase("fight"); }, 2000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const findMatch = () => {
+    unlockAudio();
+    net.connect();
+    net.ready();
+    setPhase("waiting");
   };
 
   const toggleMute = () => {
@@ -490,7 +499,7 @@ export function FightGame() {
 
   const rematch = () => {
     setRound(r => r + 1);
-    startFight(difficulty);
+    findMatch();
   };
 
   // Progress bar for current word
