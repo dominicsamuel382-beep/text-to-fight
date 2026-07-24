@@ -201,8 +201,7 @@ function HealthBar({ hp, max, label, side, combo, meter }: { hp: number; max: nu
 
 // ---------- Main Game ----------
 export function FightGame() {
-  const [difficulty, setDifficulty] = useState<Difficulty>("brawler");
-  const [phase, setPhase] = useState<"menu" | "ready" | "fight" | "ko" | "victory">("menu");
+  const [phase, setPhase] = useState<"menu" | "waiting" | "ready" | "fight" | "ko" | "victory">("menu");
   const [round, setRound] = useState(1);
 
   const [playerHp, setPlayerHp] = useState(100);
@@ -215,8 +214,9 @@ export function FightGame() {
   const [typed, setTyped] = useState("");
   const [playerPose, setPlayerPose] = useState<"idle" | MoveType | "hurt" | "ko">("idle");
   const [enemyPose, setEnemyPose] = useState<"idle" | MoveType | "hurt" | "ko">("idle");
-  const [enemyAttackIn, setEnemyAttackIn] = useState<number>(2000);
   const [enemyIncoming, setEnemyIncoming] = useState<MoveType | null>(null);
+  const [enemyCombo, setEnemyCombo] = useState(0);
+  const [enemyMeter, setEnemyMeter] = useState(0);
   const [defensePose, setDefensePose] = useState<"block" | "dodge" | null>(null);
 
   const [shake, setShake] = useState(0);
@@ -229,6 +229,11 @@ export function FightGame() {
   const [audioMuted, setAudioMuted] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const defensePoseRef = useRef<"block" | "dodge" | null>(null);
+  const phaseRef = useRef(phase);
+  const windupSentRef = useRef(false);
+  useEffect(() => { defensePoseRef.current = defensePose; }, [defensePose]);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
   const poseTimerRef = useRef<number | null>(null);
   const enemyPoseTimerRef = useRef<number | null>(null);
 
