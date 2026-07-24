@@ -400,6 +400,10 @@ export function FightGame() {
       setTyped("");
       // pick new word to keep flow moving
       setCurrentMove(generateMove());
+      windupSentRef.current = false;
+      net.emit("opponent:miss");
+      // stumble also costs HP — sync it
+      setPlayerHp(hp => { net.emit("opponent:hp", { hp }); return hp; });
       sfx.typeMiss();
       return;
     }
@@ -408,6 +412,15 @@ export function FightGame() {
 
     // key click on progress
     if (val.length > typed.length && val !== target) sfx.typeKey();
+
+    // Telegraph an incoming attack to the opponent on the first correct keystroke.
+    if (val.length === 1 && !windupSentRef.current) {
+      const t = currentMove.type;
+      if (t === "punch" || t === "kick" || t === "aerial" || t === "special") {
+        windupSentRef.current = true;
+        net.emit("opponent:windup", { move: t as NetMove });
+      }
+    }
 
     if (val === target) {
       // Executed move
@@ -419,12 +432,13 @@ export function FightGame() {
         addFloat(currentMove.type.toUpperCase() + "!", "left", currentMove.color, 24);
         if (currentMove.type === "block") sfx.block(); else sfx.dodge();
       } else {
-        // damage enemy
+        // damage enemy — send authoritative attack over the wire; the opponent
+        // applies their defense modifier and echoes back their new HP.
         const comboMult = 1 + combo * 0.05;
         const dmg = Math.round(currentMove.damage * comboMult);
+        net.emit("opponent:attack", { move: currentMove.type as NetMove, damage: dmg });
         setPose("player", currentMove.type, 300);
         setTimeout(() => {
-          setEnemyHp(hp => Math.max(0, hp - dmg));
           setPose("enemy", "hurt", 250);
           addSpark("right", currentMove.color);
           addFloat(`-${dmg}`, "right", "var(--neon-yellow)", isSpecial ? 44 : 30);
@@ -459,6 +473,7 @@ export function FightGame() {
       // Auto-serve special if meter is full and combo >= 5
       const forceSpecial = nextMeter >= 100 && newCombo >= 3 && Math.random() < 0.5;
       setCurrentMove(generateMove(forceSpecial));
+      windupSentRef.current = false;
     }
   };
 
