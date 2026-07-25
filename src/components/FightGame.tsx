@@ -594,6 +594,7 @@ export function FightGame() {
     setRoomError(null);
     setIsJoining(true);
 
+    net.subscribeRoom(id);
     net.connect();
     const myId = net.getId() || Math.random().toString(36).substring(2);
 
@@ -609,14 +610,14 @@ export function FightGame() {
       if (phaseRef.current === "lobby") {
         net.emit("room:join_request", { roomId: id, senderId: myId });
       }
-    }, 800);
+    }, 600);
 
     if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
     joinTimeoutRef.current = window.setTimeout(() => {
       clearTimeout(retryTimer);
       setIsJoining(false);
       setRoomError("Room not found. Check the Room ID and try again.");
-    }, 5000);
+    }, 4000);
   };
 
   const openLobby = () => {

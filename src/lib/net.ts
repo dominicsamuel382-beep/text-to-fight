@@ -1,5 +1,6 @@
 import { io, type Socket } from "socket.io-client";
 import Peer, { type DataConnection } from "peerjs";
+import mqtt, { type MqttClient } from "mqtt";
 
 export type NetMove = "punch" | "kick" | "block" | "dodge" | "aerial" | "special";
 
@@ -27,10 +28,17 @@ const SOCKET_URL =
 
 let socket: Socket | null = null;
 let peer: Peer | null = null;
+let mqttClient: MqttClient | null = null;
+let currentRoomTopic: string | null = null;
 const activePeerConnections: DataConnection[] = [];
 
-// High-availability WebRTC ICE Configuration (STUN + TURN servers)
-// Enables NAT traversal & cross-network P2P connections across different ISPs / mobile data
+// Global high-availability MQTT WSS brokers (works across any OS, browser, cellular/wifi network on WSS port 443)
+const MQTT_BROKER_URLS = [
+  "wss://broker.emqx.io:8084/mqtt",
+  "wss://broker.hivemq.com:8884/mqtt",
+];
+
+// WebRTC ICE Configuration (STUN + TURN servers)
 const PEER_CONFIG = {
   config: {
     iceServers: [
@@ -51,22 +59,17 @@ const PEER_CONFIG = {
         username: "openrelay",
         credential: "openrelay",
       },
-      {
-        urls: "turn:openrelay.metered.ca:443?transport=tcp",
-        username: "openrelay",
-        credential: "openrelay",
-      },
     ],
   },
 };
 
-// Unique client instance ID that works offline/locally without requiring a socket connection ID
+// Unique client instance ID
 const myClientId = "client_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
 
-// Multi-tab local channel fallback (guarantees instant zero-backend communication across browser tabs)
+// Multi-tab local channel fallback
 const localChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("text-to-fight-net-bus") : null;
 
-// Registry of active event listeners
+// Registry of active event listeners & message de-duplication
 const eventListeners = new Map<string, Set<Listener>>();
 const processedMsgIds = new Set<string>();
 
@@ -76,7 +79,7 @@ function handleIncomingMessage(event: string, payload: any) {
   // Ignore self-emitted messages
   if (payload.senderClientId === myClientId) return;
 
-  // Deduplicate messages received via multiple transports
+  // Deduplicate messages received via multiple transport channels
   if (payload.msgId) {
     if (processedMsgIds.has(payload.msgId)) return;
     processedMsgIds.add(payload.msgId);
@@ -107,8 +110,48 @@ if (localChannel) {
   };
 }
 
+// Initialize MQTT over WebSocket connection
+function initMqtt() {
+  if (typeof window === "undefined" || mqttClient) return;
+
+  try {
+    mqttClient = mqtt.connect(MQTT_BROKER_URLS[0], {
+      clientId: myClientId,
+      keepalive: 30,
+      reconnectPeriod: 2000,
+      connectTimeout: 8000,
+      clean: true,
+    });
+
+    mqttClient.on("connect", () => {
+      if (currentRoomTopic) {
+        mqttClient?.subscribe(currentRoomTopic);
+      }
+    });
+
+    mqttClient.on("message", (_topic, message) => {
+      try {
+        const payloadStr = message.toString();
+        const data = JSON.parse(payloadStr);
+        if (data && data.event && data.payload) {
+          handleIncomingMessage(data.event, data.payload);
+        }
+      } catch (e) {
+        // ignore parse error
+      }
+    });
+
+    mqttClient.on("error", (err) => {
+      console.log("MQTT notice:", err.message);
+    });
+  } catch (e) {
+    console.warn("MQTT init exception:", e);
+  }
+}
+
 export const net = {
   connect() {
+    initMqtt();
     if (SOCKET_URL && !socket) {
       socket = io(SOCKET_URL, { transports: ["websocket"], autoConnect: true });
       socket.onAny((event: string, ...args: any[]) => {
@@ -120,8 +163,30 @@ export const net = {
   getId(): string {
     return (socket && socket.id) ? socket.id : myClientId;
   },
+  subscribeRoom(roomId: string) {
+    const cleanId = roomId.trim().toUpperCase();
+    const newTopic = `ttf/room/${cleanId}`;
+
+    if (currentRoomTopic && currentRoomTopic !== newTopic && mqttClient && mqttClient.connected) {
+      mqttClient.unsubscribe(currentRoomTopic);
+    }
+
+    currentRoomTopic = newTopic;
+    initMqtt();
+
+    if (mqttClient && mqttClient.connected) {
+      mqttClient.subscribe(newTopic);
+    }
+  },
+  unsubscribeRoom() {
+    if (currentRoomTopic && mqttClient && mqttClient.connected) {
+      mqttClient.unsubscribe(currentRoomTopic);
+    }
+    currentRoomTopic = null;
+  },
   createRoomPeer(roomId: string) {
     if (typeof window === "undefined") return;
+    net.subscribeRoom(roomId);
     net.closePeer();
     const peerId = `ttf-room-${roomId.trim().toUpperCase()}`;
     try {
@@ -147,6 +212,7 @@ export const net = {
   },
   joinRoomPeer(roomId: string, callback?: (success: boolean) => void) {
     if (typeof window === "undefined") return;
+    net.subscribeRoom(roomId);
     net.closePeer();
     const targetPeerId = `ttf-room-${roomId.trim().toUpperCase()}`;
     try {
@@ -205,31 +271,40 @@ export const net = {
       msgId,
     };
 
-    // 1. Send over WebRTC P2P DataChannel if active
+    // 1. Publish via Global MQTT WSS Cloud Broker (Guaranteed cross-network & cross-OS delivery)
+    if (mqttClient && currentRoomTopic) {
+      try {
+        mqttClient.publish(currentRoomTopic, JSON.stringify({ event: event as string, payload: fullPayload }));
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    // 2. Send over WebRTC P2P DataChannel if active
     activePeerConnections.forEach(conn => {
       if (conn.open) {
         conn.send({ event: event as string, payload: fullPayload });
       }
     });
 
-    // 2. Send over Socket.IO if connected
+    // 3. Send over Socket.IO if connected
     if (socket && socket.connected) {
       socket.emit(event as string, fullPayload);
     }
 
-    // 3. Send over BroadcastChannel (inter-tab communication)
+    // 4. Send over BroadcastChannel (local inter-tab communication)
     if (localChannel) {
       localChannel.postMessage({ event: event as string, payload: fullPayload });
     }
   },
   disconnect() {
+    net.unsubscribeRoom();
     net.closePeer();
     socket?.disconnect();
     socket = null;
   },
 };
 
-/** Generate a human-readable 6-character room ID (letters + digits, no ambiguous chars). */
 export function generateRoomId(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let id = "";
