@@ -306,7 +306,8 @@ export function FightGame() {
     const offJoinReq = net.on("room:join_request", ({ roomId: reqRoomId, senderId }) => {
       const currentRoomId = roomIdRef.current;
       const currentPhase = phaseRef.current;
-      if (!currentRoomId || reqRoomId !== currentRoomId) return;
+      if (!currentRoomId || !reqRoomId) return;
+      if (reqRoomId.trim().toUpperCase() !== currentRoomId.trim().toUpperCase()) return;
 
       if (currentPhase === "hosting") {
         // Room has space — accept joiner & start match
@@ -596,11 +597,18 @@ export function FightGame() {
     const myId = net.getId() || Math.random().toString(36).substring(2);
     net.emit("room:join_request", { roomId: id, senderId: myId });
 
+    const retryTimer = window.setTimeout(() => {
+      if (phaseRef.current === "lobby") {
+        net.emit("room:join_request", { roomId: id, senderId: myId });
+      }
+    }, 400);
+
     if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
     joinTimeoutRef.current = window.setTimeout(() => {
+      clearTimeout(retryTimer);
       setIsJoining(false);
       setRoomError("Room not found. Check the Room ID and try again.");
-    }, 2500);
+    }, 3000);
   };
 
   const openLobby = () => {
