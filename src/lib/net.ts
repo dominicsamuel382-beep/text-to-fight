@@ -6,6 +6,14 @@ import { io, type Socket } from "socket.io-client";
 export type NetMove = "punch" | "kick" | "block" | "dodge" | "aerial" | "special";
 
 export interface NetEvents {
+  // Room management
+  "room:create": (payload: { roomId: string }) => void;
+  "room:join": (payload: { roomId: string }) => void;
+  "room:joined": (payload: { roomId: string; playerCount: number }) => void;
+  "room:full": (payload: { roomId: string }) => void;
+  "room:not_found": (payload: { roomId: string }) => void;
+  "room:start": (payload: { roomId: string }) => void;
+  // In-game events (all scoped to a room via roomId payload)
   "match:start": () => void;
   "match:end": (payload: { winner: "me" | "you" }) => void;
   "opponent:windup": (payload: { move: NetMove }) => void;
@@ -35,6 +43,11 @@ export function getSocket(): Socket {
   return socket;
 }
 
+// ---- Room-based net API ----
+// Rooms are implemented using socket.io server-side rooms (via room:create/join
+// events). The server is expected to handle these and relay in-room events only
+// to members of that room. All game events are scoped to the room by the server.
+
 export const net = {
   connect() {
     return getSocket();
@@ -46,6 +59,15 @@ export const net = {
   emit<K extends keyof NetEvents>(event: K, ...args: Parameters<NetEvents[K]>) {
     getSocket().emit(event as string, ...args);
   },
+  /** Create a new room and become the host. Returns the generated roomId. */
+  createRoom(roomId: string) {
+    getSocket().emit("room:create", { roomId });
+  },
+  /** Join an existing room by ID. */
+  joinRoom(roomId: string) {
+    getSocket().emit("room:join", { roomId });
+  },
+  /** Legacy — kept for rematch flow which re-enters the room lobby. */
   ready() {
     getSocket().emit("player:ready");
   },
@@ -54,3 +76,13 @@ export const net = {
     socket = null;
   },
 };
+
+/** Generate a human-readable 6-character room ID (letters + digits, no ambiguous chars). */
+export function generateRoomId(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let id = "";
+  for (let i = 0; i < 6; i++) {
+    id += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return id;
+}

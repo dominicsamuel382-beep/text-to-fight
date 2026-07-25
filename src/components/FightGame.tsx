@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sfx, unlockAudio, setMuted, isMuted } from "@/lib/chiptune";
-import { net, type NetMove } from "@/lib/net";
+import { net, type NetMove, generateRoomId } from "@/lib/net";
 
 type MoveType = "punch" | "kick" | "block" | "dodge" | "aerial" | "special";
 type Fighter = "player" | "enemy";
@@ -201,7 +201,11 @@ function HealthBar({ hp, max, label, side, combo, meter }: { hp: number; max: nu
 
 // ---------- Main Game ----------
 export function FightGame() {
-  const [phase, setPhase] = useState<"menu" | "waiting" | "ready" | "fight" | "ko" | "victory">("menu");
+  // lobby phases: menu → (creating | joining) → hosting (host waits for 2nd) | fight
+  const [phase, setPhase] = useState<"menu" | "lobby" | "hosting" | "ready" | "fight" | "ko" | "victory">("menu");
+  const [roomId, setRoomId] = useState("");
+  const [joinInput, setJoinInput] = useState("");
+  const [roomError, setRoomError] = useState<string | null>(null);
   const [round, setRound] = useState(1);
 
   const [playerHp, setPlayerHp] = useState(100);
@@ -291,8 +295,26 @@ export function FightGame() {
 
   // ---- Multiplayer: apply incoming opponent events ----
   useEffect(() => {
+    // Room management events
+    const offJoined = net.on("room:joined", ({ playerCount }) => {
+      // Fired for both host and joining player when someone successfully joins.
+      if (playerCount === 2) {
+        // Both players present — the server will fire room:start
+      }
+    });
+    const offFull = net.on("room:full", () => {
+      setRoomError("Room is full. Please try a different Room ID.");
+      setPhase("lobby");
+    });
+    const offNotFound = net.on("room:not_found", () => {
+      setRoomError("Room not found. Check the Room ID and try again.");
+      setPhase("lobby");
+    });
+    const offRoomStart = net.on("room:start", () => {
+      beginCountdown();
+    });
     const offStart = net.on("match:start", () => {
-      // Server confirms both players are in — begin countdown.
+      // Legacy / alternative server signal — begin countdown.
       beginCountdown();
     });
     const offWindup = net.on("opponent:windup", ({ move }) => {
@@ -339,12 +361,12 @@ export function FightGame() {
       setPose("enemy", "hurt", 180);
     });
     const offDisc = net.on("opponent:disconnect", () => {
-      if (phaseRef.current === "fight" || phaseRef.current === "waiting") {
+      if (phaseRef.current === "fight" || phaseRef.current === "hosting") {
         setFlash("OPPONENT LEFT");
         window.setTimeout(() => { setFlash(null); setPhase("menu"); }, 1500);
       }
     });
-    return () => { offStart(); offWindup(); offAttack(); offHp(); offStats(); offMiss(); offDisc(); };
+    return () => { offJoined(); offFull(); offNotFound(); offRoomStart(); offStart(); offWindup(); offAttack(); offHp(); offStats(); offMiss(); offDisc(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -497,11 +519,46 @@ export function FightGame() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const findMatch = () => {
+  const handleCreateRoom = () => {
     unlockAudio();
+    sfx.select();
     net.connect();
-    net.ready();
-    setPhase("waiting");
+    const id = generateRoomId();
+    setRoomId(id);
+    setRoomError(null);
+    net.createRoom(id);
+    setPhase("hosting");
+  };
+
+  const handleJoinRoom = () => {
+    const id = joinInput.trim().toUpperCase();
+    if (!id || id.length < 4) {
+      setRoomError("Please enter a valid Room ID.");
+      return;
+    }
+    unlockAudio();
+    sfx.select();
+    net.connect();
+    setRoomError(null);
+    net.joinRoom(id);
+    // Errors (full / not found) come back as socket events; stay on lobby
+  };
+
+  const openLobby = () => {
+    unlockAudio();
+    sfx.select();
+    setJoinInput("");
+    setRoomError(null);
+    setPhase("lobby");
+  };
+
+  const backToMenu = () => {
+    sfx.back();
+    net.disconnect();
+    setRoomId("");
+    setJoinInput("");
+    setRoomError(null);
+    setPhase("menu");
   };
 
   const toggleMute = () => {
@@ -514,7 +571,7 @@ export function FightGame() {
 
   const rematch = () => {
     setRound(r => r + 1);
-    findMatch();
+    openLobby();
   };
 
   // Progress bar for current word
@@ -668,7 +725,8 @@ export function FightGame() {
           <div className="mt-8 flex flex-col items-center gap-3">
             <div className="text-xs tracking-[0.4em] opacity-70">1 v 1 ONLINE</div>
             <button
-              onClick={() => { sfx.select(); findMatch(); }}
+              id="btn-play-online"
+              onClick={openLobby}
               onMouseEnter={() => sfx.cursor()}
               className="px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform"
               style={{
@@ -678,7 +736,7 @@ export function FightGame() {
                 boxShadow: "0 0 20px var(--neon-pink)",
               }}
             >
-              FIND MATCH
+              PLAY ONLINE
             </button>
             <p className="mt-6 max-w-md text-center text-sm opacity-70 leading-relaxed">
               Every keystroke is a strike. Type <span style={{ color: "var(--neon-cyan)" }}>attack words</span> to unleash punches, kicks and aerials. Type <span style={{ color: "var(--neon-purple)" }}>BLOCK</span> or <span style={{ color: "var(--neon-purple)" }}>DODGE</span> to counter your opponent's incoming attacks. Chain hits for ultimates.
@@ -687,17 +745,131 @@ export function FightGame() {
         </Overlay>
       )}
 
-      {phase === "waiting" && (
+      {/* Lobby: Create or Join a room */}
+      {phase === "lobby" && (
         <Overlay>
           <Title />
-          <div className="mt-8 flex flex-col items-center gap-3">
-            <div className="text-lg tracking-[0.4em] animate-pulse" style={{ color: "var(--neon-cyan)", textShadow: "0 0 12px currentColor" }}>
-              SEARCHING FOR OPPONENT…
+          <div className="mt-8 flex flex-col items-center gap-6 w-full max-w-sm px-4">
+            {/* Create Room */}
+            <div className="w-full flex flex-col items-center gap-2">
+              <button
+                id="btn-create-room"
+                onClick={handleCreateRoom}
+                onMouseEnter={() => sfx.cursor()}
+                className="w-full px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform"
+                style={{
+                  borderColor: "var(--neon-pink)",
+                  color: "var(--neon-pink)",
+                  background: "rgba(0,0,0,0.6)",
+                  boxShadow: "0 0 20px var(--neon-pink)",
+                }}
+              >
+                CREATE ROOM
+              </button>
             </div>
-            <button
-              onClick={() => { sfx.back(); net.disconnect(); setPhase("menu"); }}
-              className="mt-6 text-xs opacity-70 tracking-widest hover:opacity-100"
-            >CANCEL</button>
+
+            <div className="flex items-center gap-3 w-full">
+              <div className="flex-1 border-t" style={{ borderColor: "rgba(255,255,255,0.15)" }} />
+              <span className="text-xs tracking-[0.3em] opacity-50">OR</span>
+              <div className="flex-1 border-t" style={{ borderColor: "rgba(255,255,255,0.15)" }} />
+            </div>
+
+            {/* Join Room */}
+            <div className="w-full flex flex-col items-center gap-3">
+              <div className="text-xs tracking-[0.4em] opacity-70">JOIN A ROOM</div>
+              <input
+                id="input-room-id"
+                type="text"
+                value={joinInput}
+                onChange={e => { setJoinInput(e.target.value.toUpperCase().slice(0, 8)); setRoomError(null); }}
+                onKeyDown={e => e.key === "Enter" && handleJoinRoom()}
+                placeholder="ENTER ROOM ID"
+                maxLength={8}
+                className="w-full text-center py-3 px-4 border-2 font-black tracking-[0.3em] text-xl bg-transparent outline-none focus:ring-0"
+                style={{
+                  borderColor: roomError ? "var(--hp-red)" : "var(--neon-cyan)",
+                  color: "var(--neon-cyan)",
+                  boxShadow: roomError ? "0 0 16px var(--hp-red)" : "0 0 12px var(--neon-cyan)",
+                  caretColor: "var(--neon-cyan)",
+                }}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              {roomError && (
+                <div
+                  className="text-xs tracking-widest text-center px-3 py-2 border"
+                  style={{ borderColor: "var(--hp-red)", color: "var(--hp-red)", background: "rgba(255,0,0,0.1)" }}
+                >
+                  {roomError}
+                </div>
+              )}
+              <button
+                id="btn-join-room"
+                onClick={handleJoinRoom}
+                onMouseEnter={() => sfx.cursor()}
+                disabled={!joinInput.trim()}
+                className="w-full px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                style={{
+                  borderColor: "var(--neon-cyan)",
+                  color: "var(--neon-cyan)",
+                  background: "rgba(0,0,0,0.6)",
+                  boxShadow: "0 0 16px var(--neon-cyan)",
+                }}
+              >
+                JOIN ROOM
+              </button>
+            </div>
+
+            <button id="btn-lobby-back" onClick={backToMenu} className="mt-2 text-xs opacity-60 tracking-widest hover:opacity-100">
+              ← BACK
+            </button>
+          </div>
+        </Overlay>
+      )}
+
+      {/* Hosting: waiting for second player */}
+      {phase === "hosting" && (
+        <Overlay>
+          <Title />
+          <div className="mt-8 flex flex-col items-center gap-4">
+            <div className="text-xs tracking-[0.4em] opacity-70">YOUR ROOM ID</div>
+            {/* Room ID display — styled as a code badge */}
+            <div
+              className="px-8 py-4 border-2 font-black tracking-[0.5em] text-4xl select-all"
+              style={{
+                borderColor: "var(--neon-cyan)",
+                color: "var(--neon-cyan)",
+                background: "rgba(0,0,0,0.7)",
+                boxShadow: "0 0 32px var(--neon-cyan), inset 0 0 16px rgba(0,255,255,0.06)",
+                textShadow: "0 0 16px var(--neon-cyan)",
+                letterSpacing: "0.35em",
+              }}
+            >
+              {roomId}
+            </div>
+            <div className="text-xs tracking-widest opacity-60 text-center max-w-xs">
+              Share this code with your opponent.<br />The game starts as soon as they join.
+            </div>
+            {/* Animated waiting indicator */}
+            <div className="mt-2 flex items-center gap-3">
+              <div className="flex gap-1">
+                {[0, 1, 2].map(i => (
+                  <div
+                    key={i}
+                    className="w-2 h-2 rounded-full animate-pulse"
+                    style={{
+                      background: "var(--neon-pink)",
+                      animationDelay: `${i * 0.25}s`,
+                      boxShadow: "0 0 8px var(--neon-pink)",
+                    }}
+                  />
+                ))}
+              </div>
+              <span className="text-sm tracking-[0.3em]" style={{ color: "var(--neon-pink)" }}>WAITING FOR OPPONENT</span>
+            </div>
+            <button id="btn-hosting-cancel" onClick={backToMenu} className="mt-4 text-xs opacity-60 tracking-widest hover:opacity-100">
+              CANCEL
+            </button>
           </div>
         </Overlay>
       )}
