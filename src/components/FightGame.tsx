@@ -74,7 +74,6 @@ function FighterSprite({
   color: string;
   accent: string;
 }) {
-  // Simple vector fighter, stylized, poses via transforms
   const flip = side === "right" ? -1 : 1;
   const armAngle =
     pose === "punch" ? 90 :
@@ -201,10 +200,10 @@ function HealthBar({ hp, max, label, side, combo, meter }: { hp: number; max: nu
 
 // ---------- Main Game ----------
 export function FightGame() {
-  // lobby phases: menu → (creating | joining) → hosting (host waits for 2nd) | fight
   const [phase, setPhase] = useState<"menu" | "lobby" | "hosting" | "ready" | "fight" | "ko" | "victory">("menu");
   const [roomId, setRoomId] = useState("");
   const [joinInput, setJoinInput] = useState("");
+  const [isJoining, setIsJoining] = useState(false);
   const [roomError, setRoomError] = useState<string | null>(null);
   const [round, setRound] = useState(1);
 
@@ -233,17 +232,25 @@ export function FightGame() {
   const [audioMuted, setAudioMuted] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const inputRoomRef = useRef<HTMLInputElement>(null);
   const defensePoseRef = useRef<"block" | "dodge" | null>(null);
   const phaseRef = useRef(phase);
+  const roomIdRef = useRef(roomId);
   const windupSentRef = useRef(false);
+  const joinTimeoutRef = useRef<number | null>(null);
+
   useEffect(() => { defensePoseRef.current = defensePose; }, [defensePose]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
+
   const poseTimerRef = useRef<number | null>(null);
   const enemyPoseTimerRef = useRef<number | null>(null);
 
-  // Auto focus input during fight
+  // Auto focus move input ONLY during fight
   useEffect(() => {
-    if (phase === "fight") inputRef.current?.focus();
+    if (phase === "fight") {
+      inputRef.current?.focus();
+    }
   }, [phase, currentMove]);
 
   // Health-low warning beep
@@ -293,36 +300,65 @@ export function FightGame() {
     }
   }, []);
 
-  // ---- Multiplayer: apply incoming opponent events ----
+  // ---- Multiplayer socket event listeners ----
   useEffect(() => {
-    // Room management events
-    const offJoined = net.on("room:joined", ({ playerCount }) => {
-      // Fired for both host and joining player when someone successfully joins.
-      if (playerCount === 2) {
-        // Both players present — the server will fire room:start
+    // Host receives join request from another player
+    const offJoinReq = net.on("room:join_request", ({ roomId: reqRoomId, senderId }) => {
+      const currentRoomId = roomIdRef.current;
+      const currentPhase = phaseRef.current;
+      if (!currentRoomId || reqRoomId !== currentRoomId) return;
+
+      if (currentPhase === "hosting") {
+        // Room has space — accept joiner & start match
+        net.emit("room:accept", {
+          roomId: currentRoomId,
+          hostId: net.getId(),
+          targetId: senderId,
+        });
+        beginCountdown();
+      } else if (currentPhase === "ready" || currentPhase === "fight") {
+        // Room is already full (strictly 1v1)
+        net.emit("room:full", {
+          roomId: currentRoomId,
+          targetId: senderId,
+        });
       }
     });
-    const offFull = net.on("room:full", () => {
-      setRoomError("Room is full. Please try a different Room ID.");
-      setPhase("lobby");
-    });
-    const offNotFound = net.on("room:not_found", () => {
-      setRoomError("Room not found. Check the Room ID and try again.");
-      setPhase("lobby");
-    });
-    const offRoomStart = net.on("room:start", () => {
+
+    // Joiner receives acceptance from host
+    const offAccept = net.on("room:accept", ({ roomId: acceptedRoomId, targetId }) => {
+      const myId = net.getId();
+      if (targetId && myId && targetId !== myId) return;
+
+      if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
+      setIsJoining(false);
+      setRoomId(acceptedRoomId);
+      roomIdRef.current = acceptedRoomId;
+      setRoomError(null);
       beginCountdown();
     });
-    const offStart = net.on("match:start", () => {
-      // Legacy / alternative server signal — begin countdown.
-      beginCountdown();
+
+    // Joiner receives room full error from host
+    const offFull = net.on("room:full", ({ targetId }) => {
+      const myId = net.getId();
+      if (targetId && myId && targetId !== myId) return;
+
+      if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
+      setIsJoining(false);
+      setRoomError("Room is full. Maximum 2 players allowed.");
+      setPhase("lobby");
     });
-    const offWindup = net.on("opponent:windup", ({ move }) => {
+
+    // In-game events (filtered by roomId)
+    const offWindup = net.on("opponent:windup", ({ move, roomId: eventRoomId }) => {
       if (phaseRef.current !== "fight") return;
+      if (eventRoomId && roomIdRef.current && eventRoomId !== roomIdRef.current) return;
       setEnemyIncoming(move);
     });
-    const offAttack = net.on("opponent:attack", ({ move, damage }) => {
+
+    const offAttack = net.on("opponent:attack", ({ move, damage, roomId: eventRoomId }) => {
       if (phaseRef.current !== "fight") return;
+      if (eventRoomId && roomIdRef.current && eventRoomId !== roomIdRef.current) return;
       setPose("enemy", move, 350);
       const guard = defensePoseRef.current;
       let dmg = damage;
@@ -333,7 +369,7 @@ export function FightGame() {
         if (dmg > 0) {
           setPlayerHp(hp => {
             const next = Math.max(0, hp - Math.round(dmg));
-            net.emit("opponent:hp", { hp: next });
+            net.emit("opponent:hp", { hp: next, roomId: roomIdRef.current });
             return next;
           });
           setPose("player", "hurt", 300);
@@ -352,28 +388,52 @@ export function FightGame() {
         setDefensePose(null);
       }, 180);
     });
-    const offHp = net.on("opponent:hp", ({ hp }) => setEnemyHp(hp));
-    const offStats = net.on("opponent:stats", ({ combo: c, meter: m }) => {
+
+    const offHp = net.on("opponent:hp", ({ hp, roomId: eventRoomId }) => {
+      if (eventRoomId && roomIdRef.current && eventRoomId !== roomIdRef.current) return;
+      setEnemyHp(hp);
+    });
+
+    const offStats = net.on("opponent:stats", ({ combo: c, meter: m, roomId: eventRoomId }) => {
+      if (eventRoomId && roomIdRef.current && eventRoomId !== roomIdRef.current) return;
       setEnemyCombo(c);
       setEnemyMeter(m);
     });
-    const offMiss = net.on("opponent:miss", () => {
+
+    const offMiss = net.on("opponent:miss", (payload) => {
+      if (payload?.roomId && roomIdRef.current && payload.roomId !== roomIdRef.current) return;
       setPose("enemy", "hurt", 180);
     });
-    const offDisc = net.on("opponent:disconnect", () => {
-      if (phaseRef.current === "fight" || phaseRef.current === "hosting") {
+
+    const offDisc = net.on("opponent:disconnect", (payload) => {
+      if (payload?.roomId && roomIdRef.current && payload.roomId !== roomIdRef.current) return;
+      if (phaseRef.current === "fight" || phaseRef.current === "hosting" || phaseRef.current === "ready") {
         setFlash("OPPONENT LEFT");
-        window.setTimeout(() => { setFlash(null); setPhase("menu"); }, 1500);
+        window.setTimeout(() => {
+          setFlash(null);
+          backToMenu();
+        }, 1500);
       }
     });
-    return () => { offJoined(); offFull(); offNotFound(); offRoomStart(); offStart(); offWindup(); offAttack(); offHp(); offStats(); offMiss(); offDisc(); };
+
+    return () => {
+      offJoinReq();
+      offAccept();
+      offFull();
+      offWindup();
+      offAttack();
+      offHp();
+      offStats();
+      offMiss();
+      offDisc();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Broadcast own combo/meter so opponent's HUD stays in sync.
   useEffect(() => {
     if (phase !== "fight") return;
-    net.emit("opponent:stats", { combo, meter });
+    net.emit("opponent:stats", { combo, meter, roomId: roomIdRef.current });
   }, [combo, meter, phase]);
 
   // KO detection
@@ -406,7 +466,7 @@ export function FightGame() {
     }
   }, [enemyHp, playerHp, phase, triggerShake]);
 
-  // Handle typing input
+  // Handle typing input during fight
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (phase !== "fight") return;
     const val = e.target.value.toLowerCase();
@@ -414,38 +474,32 @@ export function FightGame() {
 
     // detect wrong char
     if (!target.startsWith(val)) {
-      // stumble
       setPose("player", "hurt", 250);
       setCombo(0);
       setPlayerHp(hp => Math.max(0, hp - 2));
       addFloat("MISS", "left", "var(--hp-red)", 22);
       setTyped("");
-      // pick new word to keep flow moving
       setCurrentMove(generateMove());
       windupSentRef.current = false;
-      net.emit("opponent:miss");
-      // stumble also costs HP — sync it
-      setPlayerHp(hp => { net.emit("opponent:hp", { hp }); return hp; });
+      net.emit("opponent:miss", { roomId: roomIdRef.current });
+      setPlayerHp(hp => { net.emit("opponent:hp", { hp, roomId: roomIdRef.current }); return hp; });
       sfx.typeMiss();
       return;
     }
 
     setTyped(val);
 
-    // key click on progress
     if (val.length > typed.length && val !== target) sfx.typeKey();
 
-    // Telegraph an incoming attack to the opponent on the first correct keystroke.
     if (val.length === 1 && !windupSentRef.current) {
       const t = currentMove.type;
       if (t === "punch" || t === "kick" || t === "aerial" || t === "special") {
         windupSentRef.current = true;
-        net.emit("opponent:windup", { move: t as NetMove });
+        net.emit("opponent:windup", { move: t as NetMove, roomId: roomIdRef.current });
       }
     }
 
     if (val === target) {
-      // Executed move
       const isSpecial = currentMove.type === "special";
       const isDefense = currentMove.type === "block" || currentMove.type === "dodge";
       if (isDefense) {
@@ -454,11 +508,9 @@ export function FightGame() {
         addFloat(currentMove.type.toUpperCase() + "!", "left", currentMove.color, 24);
         if (currentMove.type === "block") sfx.block(); else sfx.dodge();
       } else {
-        // damage enemy — send authoritative attack over the wire; the opponent
-        // applies their defense modifier and echoes back their new HP.
         const comboMult = 1 + combo * 0.05;
         const dmg = Math.round(currentMove.damage * comboMult);
-        net.emit("opponent:attack", { move: currentMove.type as NetMove, damage: dmg });
+        net.emit("opponent:attack", { move: currentMove.type as NetMove, damage: dmg, roomId: roomIdRef.current });
         setPose("player", currentMove.type, 300);
         setTimeout(() => {
           setPose("enemy", "hurt", 250);
@@ -484,7 +536,6 @@ export function FightGame() {
       setBest(b => Math.max(b, newCombo));
       if (newCombo > 1 && newCombo % 3 === 0) sfx.combo(newCombo);
 
-      // Meter fills; special uses meter
       let nextMeter = meter;
       if (isSpecial) nextMeter = 0;
       else nextMeter = Math.min(100, meter + (isDefense ? 4 : 8) + newCombo);
@@ -492,7 +543,6 @@ export function FightGame() {
       setMeter(nextMeter);
 
       setTyped("");
-      // Auto-serve special if meter is full and combo >= 5
       const forceSpecial = nextMeter >= 100 && newCombo >= 3 && Math.random() < 0.5;
       setCurrentMove(generateMove(forceSpecial));
       windupSentRef.current = false;
@@ -525,8 +575,9 @@ export function FightGame() {
     net.connect();
     const id = generateRoomId();
     setRoomId(id);
+    roomIdRef.current = id;
     setRoomError(null);
-    net.createRoom(id);
+    setIsJoining(false);
     setPhase("hosting");
   };
 
@@ -538,10 +589,18 @@ export function FightGame() {
     }
     unlockAudio();
     sfx.select();
-    net.connect();
     setRoomError(null);
-    net.joinRoom(id);
-    // Errors (full / not found) come back as socket events; stay on lobby
+    setIsJoining(true);
+
+    net.connect();
+    const myId = net.getId() || Math.random().toString(36).substring(2);
+    net.emit("room:join_request", { roomId: id, senderId: myId });
+
+    if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
+    joinTimeoutRef.current = window.setTimeout(() => {
+      setIsJoining(false);
+      setRoomError("Room not found. Check the Room ID and try again.");
+    }, 2500);
   };
 
   const openLobby = () => {
@@ -549,15 +608,23 @@ export function FightGame() {
     sfx.select();
     setJoinInput("");
     setRoomError(null);
+    setIsJoining(false);
     setPhase("lobby");
+    setTimeout(() => inputRoomRef.current?.focus(), 50);
   };
 
   const backToMenu = () => {
     sfx.back();
+    if (roomIdRef.current) {
+      net.emit("opponent:disconnect", { roomId: roomIdRef.current });
+    }
     net.disconnect();
     setRoomId("");
+    roomIdRef.current = "";
     setJoinInput("");
     setRoomError(null);
+    setIsJoining(false);
+    if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
     setPhase("menu");
   };
 
@@ -586,7 +653,11 @@ export function FightGame() {
         transition: slowmo ? "filter 0.2s" : undefined,
         filter: slowmo ? "saturate(1.6) contrast(1.15)" : undefined,
       }}
-      onClick={() => inputRef.current?.focus()}
+      onClick={() => {
+        if (phase === "fight") {
+          inputRef.current?.focus();
+        }
+      }}
     >
       <ArenaBackdrop />
 
@@ -728,7 +799,7 @@ export function FightGame() {
               id="btn-play-online"
               onClick={openLobby}
               onMouseEnter={() => sfx.cursor()}
-              className="px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform"
+              className="px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform cursor-pointer"
               style={{
                 borderColor: "var(--neon-pink)",
                 color: "var(--neon-pink)",
@@ -756,7 +827,7 @@ export function FightGame() {
                 id="btn-create-room"
                 onClick={handleCreateRoom}
                 onMouseEnter={() => sfx.cursor()}
-                className="w-full px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform"
+                className="w-full px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform cursor-pointer"
                 style={{
                   borderColor: "var(--neon-pink)",
                   color: "var(--neon-pink)",
@@ -779,13 +850,15 @@ export function FightGame() {
               <div className="text-xs tracking-[0.4em] opacity-70">JOIN A ROOM</div>
               <input
                 id="input-room-id"
+                ref={inputRoomRef}
                 type="text"
                 value={joinInput}
                 onChange={e => { setJoinInput(e.target.value.toUpperCase().slice(0, 8)); setRoomError(null); }}
-                onKeyDown={e => e.key === "Enter" && handleJoinRoom()}
+                onKeyDown={e => e.key === "Enter" && !isJoining && handleJoinRoom()}
+                onClick={e => e.stopPropagation()}
                 placeholder="ENTER ROOM ID"
                 maxLength={8}
-                className="w-full text-center py-3 px-4 border-2 font-black tracking-[0.3em] text-xl bg-transparent outline-none focus:ring-0"
+                className="w-full text-center py-3 px-4 border-2 font-black tracking-[0.3em] text-xl bg-transparent outline-none focus:ring-2 focus:ring-cyan-400 cursor-text"
                 style={{
                   borderColor: roomError ? "var(--hp-red)" : "var(--neon-cyan)",
                   color: "var(--neon-cyan)",
@@ -794,6 +867,8 @@ export function FightGame() {
                 }}
                 autoComplete="off"
                 spellCheck={false}
+                disabled={isJoining}
+                autoFocus
               />
               {roomError && (
                 <div
@@ -805,10 +880,10 @@ export function FightGame() {
               )}
               <button
                 id="btn-join-room"
-                onClick={handleJoinRoom}
+                onClick={(e) => { e.stopPropagation(); handleJoinRoom(); }}
                 onMouseEnter={() => sfx.cursor()}
-                disabled={!joinInput.trim()}
-                className="w-full px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                disabled={!joinInput.trim() || isJoining}
+                className="w-full px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
                 style={{
                   borderColor: "var(--neon-cyan)",
                   color: "var(--neon-cyan)",
@@ -816,11 +891,11 @@ export function FightGame() {
                   boxShadow: "0 0 16px var(--neon-cyan)",
                 }}
               >
-                JOIN ROOM
+                {isJoining ? "CONNECTING..." : "JOIN ROOM"}
               </button>
             </div>
 
-            <button id="btn-lobby-back" onClick={backToMenu} className="mt-2 text-xs opacity-60 tracking-widest hover:opacity-100">
+            <button id="btn-lobby-back" onClick={backToMenu} className="mt-2 text-xs opacity-60 tracking-widest hover:opacity-100 cursor-pointer">
               ← BACK
             </button>
           </div>
@@ -833,7 +908,6 @@ export function FightGame() {
           <Title />
           <div className="mt-8 flex flex-col items-center gap-4">
             <div className="text-xs tracking-[0.4em] opacity-70">YOUR ROOM ID</div>
-            {/* Room ID display — styled as a code badge */}
             <div
               className="px-8 py-4 border-2 font-black tracking-[0.5em] text-4xl select-all"
               style={{
@@ -850,7 +924,6 @@ export function FightGame() {
             <div className="text-xs tracking-widest opacity-60 text-center max-w-xs">
               Share this code with your opponent.<br />The game starts as soon as they join.
             </div>
-            {/* Animated waiting indicator */}
             <div className="mt-2 flex items-center gap-3">
               <div className="flex gap-1">
                 {[0, 1, 2].map(i => (
@@ -867,7 +940,7 @@ export function FightGame() {
               </div>
               <span className="text-sm tracking-[0.3em]" style={{ color: "var(--neon-pink)" }}>WAITING FOR OPPONENT</span>
             </div>
-            <button id="btn-hosting-cancel" onClick={backToMenu} className="mt-4 text-xs opacity-60 tracking-widest hover:opacity-100">
+            <button id="btn-hosting-cancel" onClick={backToMenu} className="mt-4 text-xs opacity-60 tracking-widest hover:opacity-100 cursor-pointer">
               CANCEL
             </button>
           </div>
@@ -878,8 +951,8 @@ export function FightGame() {
         <Overlay>
           <div className="text-6xl font-black tracking-widest mb-4" style={{ color: "var(--neon-yellow)", textShadow: "0 0 20px currentColor" }}>VICTORY</div>
           <div className="text-sm tracking-widest opacity-80">BEST COMBO · {best}</div>
-          <button onClick={() => { sfx.select(); rematch(); }} onMouseEnter={() => sfx.cursor()} className="mt-8 px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform" style={{ borderColor: "var(--neon-pink)", color: "var(--neon-pink)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 20px var(--neon-pink)" }}>REMATCH</button>
-          <button onClick={() => { sfx.back(); setPhase("menu"); }} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">LEAVE MATCH</button>
+          <button onClick={() => { sfx.select(); rematch(); }} onMouseEnter={() => sfx.cursor()} className="mt-8 px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform cursor-pointer" style={{ borderColor: "var(--neon-pink)", color: "var(--neon-pink)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 20px var(--neon-pink)" }}>REMATCH</button>
+          <button onClick={backToMenu} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100 cursor-pointer">LEAVE MATCH</button>
         </Overlay>
       )}
 
@@ -887,8 +960,8 @@ export function FightGame() {
         <Overlay>
           <div className="text-6xl font-black tracking-widest mb-4" style={{ color: "var(--hp-red)", textShadow: "0 0 20px currentColor" }}>YOU LOSE</div>
           <div className="text-sm tracking-widest opacity-80">BEST COMBO · {best}</div>
-          <button onClick={() => { sfx.select(); rematch(); }} onMouseEnter={() => sfx.cursor()} className="mt-8 px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform" style={{ borderColor: "var(--neon-cyan)", color: "var(--neon-cyan)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 20px var(--neon-cyan)" }}>TRY AGAIN</button>
-          <button onClick={() => { sfx.back(); setPhase("menu"); }} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100">LEAVE MATCH</button>
+          <button onClick={() => { sfx.select(); rematch(); }} onMouseEnter={() => sfx.cursor()} className="mt-8 px-8 py-3 border-2 font-black tracking-widest hover:scale-105 transition-transform cursor-pointer" style={{ borderColor: "var(--neon-cyan)", color: "var(--neon-cyan)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 20px var(--neon-cyan)" }}>TRY AGAIN</button>
+          <button onClick={backToMenu} className="mt-3 text-xs opacity-70 tracking-widest hover:opacity-100 cursor-pointer">LEAVE MATCH</button>
         </Overlay>
       )}
     </main>
@@ -907,7 +980,11 @@ function Title() {
 
 function Overlay({ children }: { children: React.ReactNode }) {
   return (
-    <div className="absolute inset-0 z-40 flex flex-col items-center justify-center backdrop-blur-sm" style={{ background: "rgba(0,0,0,0.7)" }}>
+    <div
+      className="absolute inset-0 z-40 flex flex-col items-center justify-center backdrop-blur-sm"
+      style={{ background: "rgba(0,0,0,0.7)" }}
+      onClick={(e) => e.stopPropagation()}
+    >
       {children}
     </div>
   );
