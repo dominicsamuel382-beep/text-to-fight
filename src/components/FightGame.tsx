@@ -579,6 +579,7 @@ export function FightGame() {
     roomIdRef.current = id;
     setRoomError(null);
     setIsJoining(false);
+    net.createRoomPeer(id);
     setPhase("hosting");
   };
 
@@ -595,20 +596,27 @@ export function FightGame() {
 
     net.connect();
     const myId = net.getId() || Math.random().toString(36).substring(2);
+
+    net.joinRoomPeer(id, (success) => {
+      if (success) {
+        net.emit("room:join_request", { roomId: id, senderId: myId });
+      }
+    });
+
     net.emit("room:join_request", { roomId: id, senderId: myId });
 
     const retryTimer = window.setTimeout(() => {
       if (phaseRef.current === "lobby") {
         net.emit("room:join_request", { roomId: id, senderId: myId });
       }
-    }, 400);
+    }, 800);
 
     if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
     joinTimeoutRef.current = window.setTimeout(() => {
       clearTimeout(retryTimer);
       setIsJoining(false);
       setRoomError("Room not found. Check the Room ID and try again.");
-    }, 3000);
+    }, 5000);
   };
 
   const openLobby = () => {
