@@ -29,6 +29,37 @@ let socket: Socket | null = null;
 let peer: Peer | null = null;
 const activePeerConnections: DataConnection[] = [];
 
+// High-availability WebRTC ICE Configuration (STUN + TURN servers)
+// Enables NAT traversal & cross-network P2P connections across different ISPs / mobile data
+const PEER_CONFIG = {
+  config: {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun3.l.google.com:19302" },
+      { urls: "stun:stun4.l.google.com:19302" },
+      { urls: "stun:global.stun.twilio.com:3478" },
+      { urls: "stun:stun.services.mozilla.com" },
+      {
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelay",
+        credential: "openrelay",
+      },
+      {
+        urls: "turn:openrelay.metered.ca:443",
+        username: "openrelay",
+        credential: "openrelay",
+      },
+      {
+        urls: "turn:openrelay.metered.ca:443?transport=tcp",
+        username: "openrelay",
+        credential: "openrelay",
+      },
+    ],
+  },
+};
+
 // Unique client instance ID that works offline/locally without requiring a socket connection ID
 const myClientId = "client_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
 
@@ -94,7 +125,7 @@ export const net = {
     net.closePeer();
     const peerId = `ttf-room-${roomId.trim().toUpperCase()}`;
     try {
-      peer = new Peer(peerId);
+      peer = new Peer(peerId, PEER_CONFIG);
       peer.on("connection", (conn) => {
         activePeerConnections.push(conn);
         conn.on("data", (data: any) => {
@@ -119,9 +150,9 @@ export const net = {
     net.closePeer();
     const targetPeerId = `ttf-room-${roomId.trim().toUpperCase()}`;
     try {
-      peer = new Peer();
+      peer = new Peer(PEER_CONFIG);
       peer.on("open", () => {
-        const conn = peer!.connect(targetPeerId);
+        const conn = peer!.connect(targetPeerId, { reliable: true });
         conn.on("open", () => {
           activePeerConnections.push(conn);
           if (callback) callback(true);
