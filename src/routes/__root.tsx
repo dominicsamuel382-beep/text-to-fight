@@ -77,14 +77,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "KEYSTRIKE // Neon Typing Fighter" },
+      { name: "description", content: "A cyberpunk 1v1 typing fighting game. Type fast, land combos, unleash ultimates." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "KEYSTRIKE // Neon Typing Fighter" },
+      { property: "og:description", content: "A cyberpunk 1v1 typing fighting game. Type fast, land combos, unleash ultimates." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "KEYSTRIKE // Neon Typing Fighter" },
+      { name: "twitter:description", content: "A cyberpunk 1v1 typing fighting game. Type fast, land combos, unleash ultimates." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c0adac63-8499-4037-ae1e-31670c937949/id-preview-a57676e0--cadbc07f-9174-4d65-a36e-80c175ab8776.lovable.app-1784992463588.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c0adac63-8499-4037-ae1e-31670c937949/id-preview-a57676e0--cadbc07f-9174-4d65-a36e-80c175ab8776.lovable.app-1784992463588.png" },
     ],
     links: [
       {

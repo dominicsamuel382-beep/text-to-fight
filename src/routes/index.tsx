@@ -7,7 +7,7 @@ export const Route = createFileRoute("/")({
       { title: "KEYSTRIKE // Neon Typing Fighter" },
       { name: "description", content: "A cyberpunk 1v1 typing fighting game. Type fast, land combos, unleash ultimates." },
       { property: "og:title", content: "KEYSTRIKE // Neon Typing Fighter" },
-      { property: "og:description", content: "Type to punch, kick, block, and finish. Fight the AI in a neon arena." },
+      { property: "og:description", content: "A cyberpunk 1v1 typing fighting game. Type fast, land combos, unleash ultimates." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
