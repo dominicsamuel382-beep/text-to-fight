@@ -19,6 +19,16 @@ export interface NetEvents {
   "opponent:stats": (payload: { combo: number; meter: number; roomId?: string }) => void;
   "opponent:miss": (payload?: { roomId?: string }) => void;
   "opponent:disconnect": (payload?: { roomId?: string }) => void;
+
+  // New events for rounds & ultimate
+  "round:start": (payload: { round: number; roomId?: string }) => void;
+  "round:won": (payload: { winnerId: string; round: number; roomId?: string }) => void;
+  "round:transition": (payload: { nextRound: number; roomId?: string }) => void;
+  "match:won": (payload: { winnerId: string; roomId?: string }) => void;
+  "ultimate:progress": (payload: { progress: number; roomId?: string }) => void;
+  "ultimate:ready": (payload?: { roomId?: string }) => void;
+  "ultimate:activate": (payload?: { roomId?: string }) => void;
+  "ultimate:execute": (payload: { round: number; damage: number; roomId?: string }) => void;
 }
 
 type Listener = (...args: any[]) => void;
