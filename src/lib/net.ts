@@ -25,10 +25,12 @@ export interface NetEvents {
   "round:won": (payload: { winnerId: string; round: number; roomId?: string }) => void;
   "round:transition": (payload: { nextRound: number; roomId?: string }) => void;
   "match:won": (payload: { winnerId: string; roomId?: string }) => void;
-  "ultimate:progress": (payload: { progress: number; roomId?: string }) => void;
+  "ultimate:progress": (payload: { roundId: number; ownerId: string; progress: number; roomId?: string }) => void;
   "ultimate:ready": (payload?: { roomId?: string }) => void;
-  "ultimate:activate": (payload?: { roomId?: string }) => void;
-  "ultimate:execute": (payload: { round: number; damage: number; roomId?: string }) => void;
+  "ultimate:activate": (payload: { roundId: number; ownerId: string; startedAt: number; expiresAt: number; timestamp: number; roomId?: string }) => void;
+  "ultimate:execute": (payload: { roundId: number; ownerId: string; executionId: string; damage: number; roomId?: string }) => void;
+  "ultimate:expire": (payload: { roundId: number; ownerId: string; roomId?: string }) => void;
+  "round:result": (payload: { roundId: number; winnerId: string; loserId: string; playerRoundWins: number; opponentRoundWins: number; matchOver: boolean; matchWinnerId?: string; roomId?: string }) => void;
 }
 
 type Listener = (...args: any[]) => void;

@@ -250,6 +250,8 @@ export function FightGame() {
   const [opponentUltimateProgress, setOpponentUltimateProgress] = useState(0);
   const [ultimateSequence, setUltimateSequence] = useState<string[]>([]);
   const [ultimateTriggeredThisRound, setUltimateTriggeredThisRound] = useState(false);
+  const [ultimateExpiresAt, setUltimateExpiresAt] = useState<number | null>(null);
+  const [ultimateTimeLeft, setUltimateTimeLeft] = useState(15.0);
 
   // Overlay for round complete transition
   const [roundTransitionOverlay, setRoundTransitionOverlay] = useState<{
@@ -307,6 +309,7 @@ export function FightGame() {
   const ultimateOwnerRef = useRef(ultimateOwner);
   const ultimateProgressRef = useRef(ultimateProgress);
   const ultimateTriggeredThisRoundRef = useRef(ultimateTriggeredThisRound);
+  const ultimateExpiresAtRef = useRef<number | null>(null);
 
   useEffect(() => { isHostRef.current = isHost; }, [isHost]);
   useEffect(() => { defensePoseRef.current = defensePose; }, [defensePose]);
@@ -322,6 +325,7 @@ export function FightGame() {
   useEffect(() => { ultimateOwnerRef.current = ultimateOwner; }, [ultimateOwner]);
   useEffect(() => { ultimateProgressRef.current = ultimateProgress; }, [ultimateProgress]);
   useEffect(() => { ultimateTriggeredThisRoundRef.current = ultimateTriggeredThisRound; }, [ultimateTriggeredThisRound]);
+  useEffect(() => { ultimateExpiresAtRef.current = ultimateExpiresAt; }, [ultimateExpiresAt]);
 
   const poseTimerRef = useRef<number | null>(null);
   const enemyPoseTimerRef = useRef<number | null>(null);
@@ -433,64 +437,82 @@ export function FightGame() {
     if (processedRoundsRef.current.has(currentRound)) {
       return; // Already processed this round's end
     }
-    processedRoundsRef.current.add(currentRound);
 
-    // 1. Lock gameplay input by switching phase
+    // 1. Lock gameplay input by switching phase for both Host and Guest
     setPhase("ready");
 
-    // 2. Play sound effects
-    if (winner === "player") {
-      sfx.victory();
-    } else {
-      sfx.gameOver();
-    }
+    if (isHostRef.current) {
+      processedRoundsRef.current.add(currentRound);
 
-    // 3. Update scores
-    let newPlayerWins = playerRoundWinsRef.current;
-    let newOpponentWins = opponentRoundWinsRef.current;
-    if (winner === "player") {
-      newPlayerWins += 1;
-      setPlayerRoundWins(newPlayerWins);
-    } else {
-      newOpponentWins += 1;
-      setOpponentRoundWins(newOpponentWins);
-    }
+      // Play sound effects
+      if (winner === "player") {
+        sfx.victory();
+      } else {
+        sfx.gameOver();
+      }
 
-    // 4. Show transition overlay
-    setRoundTransitionOverlay({
-      round: currentRound,
-      winner,
-      playerWins: newPlayerWins,
-      opponentWins: newOpponentWins,
-    });
+      // Update scores
+      let newPlayerWins = playerRoundWinsRef.current;
+      let newOpponentWins = opponentRoundWinsRef.current;
+      if (winner === "player") {
+        newPlayerWins += 1;
+        setPlayerRoundWins(newPlayerWins);
+      } else {
+        newOpponentWins += 1;
+        setOpponentRoundWins(newOpponentWins);
+      }
 
-    // 5. Broadcast to opponent
-    net.emit("round:won", {
-      winnerId: winner === "player" ? net.getId() : "opponent",
-      round: currentRound,
-      roomId: roomIdRef.current
-    });
+      // Check for match victory
+      const matchOver = newPlayerWins >= 2 || newOpponentWins >= 2;
+      let matchWinnerId: string | undefined = undefined;
+      if (matchOver) {
+        matchWinnerId = newPlayerWins >= 2 ? net.getId() : "opponent";
+      }
 
-    // 6. Check for match victory
-    if (newPlayerWins >= 2 || newOpponentWins >= 2) {
-      matchEndedRef.current = true;
-      setTimeout(() => {
-        setRoundTransitionOverlay(null);
-        if (newPlayerWins >= 2) {
-          setPhase("victory");
-          net.emit("match:won", { winnerId: net.getId(), roomId: roomIdRef.current });
-        } else {
-          setPhase("ko");
-          net.emit("match:won", { winnerId: "opponent", roomId: roomIdRef.current });
-        }
-      }, 3000);
-    } else {
-      // Transition to next round
-      setTimeout(() => {
-        const nextRound = (currentRound + 1) as 2 | 3;
-        transitionToRound(nextRound);
-        net.emit("round:transition", { nextRound, roomId: roomIdRef.current });
-      }, 3500);
+      // Determine authoritative IDs
+      const hostId = net.getId();
+      const guestId = "opponent";
+      const winnerId = winner === "player" ? hostId : guestId;
+      const loserId = winner === "player" ? guestId : hostId;
+
+      // Broadcast authoritative result
+      net.emit("round:result", {
+        roundId: currentRound,
+        winnerId,
+        loserId,
+        playerRoundWins: newPlayerWins,
+        opponentRoundWins: newOpponentWins,
+        matchOver,
+        matchWinnerId,
+        roomId: roomIdRef.current
+      });
+
+      // Show transition overlay
+      setRoundTransitionOverlay({
+        round: currentRound,
+        winner,
+        playerWins: newPlayerWins,
+        opponentWins: newOpponentWins,
+      });
+
+      if (matchOver) {
+        matchEndedRef.current = true;
+        setTimeout(() => {
+          setRoundTransitionOverlay(null);
+          if (newPlayerWins >= 2) {
+            setPhase("victory");
+          } else {
+            setPhase("ko");
+          }
+        }, 3000);
+      } else {
+        // Transition to next round
+        setTimeout(() => {
+          const nextRound = (currentRound + 1) as 2 | 3;
+          transitionToRound(nextRound);
+          net.emit("round:transition", { nextRound, roomId: roomIdRef.current });
+        }, 3500);
+      }
     }
   }, [transitionToRound]);
 
@@ -499,7 +521,7 @@ export function FightGame() {
     if (ultimateExecuting) return;
     setUltimateExecuting(true);
 
-    const damage = 50;
+    const damage = 30;
     const executionId = "exec_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
     processedUltimateExecutionsRef.current.add(executionId);
 
@@ -851,12 +873,59 @@ export function FightGame() {
       }
     });
 
-    const offRoundWon = net.on("round:won", ({ winnerId, round: eventRound, roomId: eventRoomId }) => {
+    const offRoundResult = net.on("round:result", ({ roundId, winnerId, loserId, playerRoundWins: hostPlayerWins, opponentRoundWins: hostOpponentWins, matchOver, matchWinnerId, roomId: eventRoomId }) => {
       if (eventRoomId && roomIdRef.current && eventRoomId !== roomIdRef.current) return;
+      
       const currentRound = roundRef.current;
-      if (eventRound === currentRound && !processedRoundsRef.current.has(currentRound)) {
-        const winner = winnerId === net.getId() ? "player" : "opponent";
-        handleRoundEnd(winner);
+      if (roundId !== currentRound) return;
+      if (processedRoundsRef.current.has(roundId)) return;
+      processedRoundsRef.current.add(roundId);
+
+      // Lock gameplay input
+      setPhase("ready");
+
+      const myId = net.getId();
+      const didIWin = winnerId === myId;
+      const roundWinnerLabel = didIWin ? "player" : "opponent";
+
+      // Play sound effects
+      if (didIWin) {
+        sfx.victory();
+      } else {
+        sfx.gameOver();
+      }
+
+      // Update scores authoritatively
+      if (isHostRef.current) {
+        setPlayerRoundWins(hostPlayerWins);
+        setOpponentRoundWins(hostOpponentWins);
+      } else {
+        setPlayerRoundWins(hostOpponentWins);
+        setOpponentRoundWins(hostPlayerWins);
+      }
+
+      const finalPlayerWins = isHostRef.current ? hostPlayerWins : hostOpponentWins;
+      const finalOpponentWins = isHostRef.current ? hostOpponentWins : hostPlayerWins;
+
+      // Show transition overlay
+      setRoundTransitionOverlay({
+        round: roundId,
+        winner: roundWinnerLabel,
+        playerWins: finalPlayerWins,
+        opponentWins: finalOpponentWins,
+      });
+
+      if (matchOver) {
+        matchEndedRef.current = true;
+        setTimeout(() => {
+          setRoundTransitionOverlay(null);
+          const amIMatchWinner = matchWinnerId === myId;
+          if (amIMatchWinner) {
+            setPhase("victory");
+          } else {
+            setPhase("ko");
+          }
+        }, 3000);
       }
     });
 
@@ -865,19 +934,7 @@ export function FightGame() {
       transitionToRound(nextRound);
     });
 
-    const offMatchWon = net.on("match:won", ({ winnerId, roomId: eventRoomId }) => {
-      if (eventRoomId && roomIdRef.current && eventRoomId !== roomIdRef.current) return;
-      if (matchEndedRef.current) return;
-      matchEndedRef.current = true;
-      setRoundTransitionOverlay(null);
-      if (winnerId === net.getId()) {
-        setPhase("victory");
-      } else {
-        setPhase("ko");
-      }
-    });
-
-    const offUltimateActivate = net.on("ultimate:activate", ({ roundId, ownerId, timestamp, roomId: eventRoomId }) => {
+    const offUltimateActivate = net.on("ultimate:activate", ({ roundId, ownerId, startedAt, expiresAt, timestamp, roomId: eventRoomId }) => {
       if (eventRoomId && roomIdRef.current && eventRoomId !== roomIdRef.current) return;
       if (roundId !== roundRef.current) return;
 
@@ -889,16 +946,16 @@ export function FightGame() {
           const myTimestamp = Date.now();
           const incomingWins = (timestamp < myTimestamp) || (timestamp === myTimestamp && ownerId < myId);
           if (incomingWins) {
-            triggerUltimateComeback("opponent", true);
+            triggerUltimateComeback("opponent", true, startedAt, expiresAt);
           }
         }
         return;
       }
 
       if (isOpponent) {
-        triggerUltimateComeback("opponent", true);
+        triggerUltimateComeback("opponent", true, startedAt, expiresAt);
       } else {
-        triggerUltimateComeback("player", true);
+        triggerUltimateComeback("player", true, startedAt, expiresAt);
       }
     });
 
@@ -962,6 +1019,19 @@ export function FightGame() {
       }, 1000);
     });
 
+    const offUltimateExpire = net.on("ultimate:expire", ({ roundId, ownerId, roomId: eventRoomId }) => {
+      if (eventRoomId && roomIdRef.current && eventRoomId !== roomIdRef.current) return;
+      if (roundId !== roundRef.current) return;
+      
+      const myId = net.getId();
+      if (ownerId !== myId) {
+        setUltimateActive(false);
+        setUltimateOwner(null);
+        setTyped("");
+        setCurrentMove(generateMove());
+      }
+    });
+
     return () => {
       offJoinReq();
       offAccept();
@@ -972,12 +1042,12 @@ export function FightGame() {
       offStats();
       offMiss();
       offDisc();
-      offRoundWon();
+      offRoundResult();
       offRoundTransition();
-      offMatchWon();
       offUltimateActivate();
       offUltimateProgress();
       offUltimateExecute();
+      offUltimateExpire();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -988,7 +1058,7 @@ export function FightGame() {
     net.emit("opponent:stats", { combo, meter, roomId: roomIdRef.current });
   }, [combo, meter, phase]);
 
-  const triggerUltimateComeback = useCallback((owner: "player" | "opponent", fromNetwork = false) => {
+  const triggerUltimateComeback = useCallback((owner: "player" | "opponent", fromNetwork = false, startedAt?: number, expiresAt?: number) => {
     ultimateActiveRef.current = true;
     ultimateOwnerRef.current = owner;
     ultimateTriggeredThisRoundRef.current = true;
@@ -1000,13 +1070,24 @@ export function FightGame() {
     setUltimateTriggeredThisRound(true);
     setUltimateSequence(generateUltimateSequence());
 
+    const now = Date.now();
+    const finalStartedAt = startedAt || now;
+    const finalExpiresAt = expiresAt || (finalStartedAt + 15000);
+
+    setUltimateExpiresAt(finalExpiresAt);
+    ultimateExpiresAtRef.current = finalExpiresAt;
+    setUltimateTimeLeft(15.0);
+
     if (owner === "player") {
       setPose("player", "special", 5000);
       if (!fromNetwork) {
         net.emit("ultimate:activate", { 
           roundId: roundRef.current, 
           ownerId: net.getId(), 
-          timestamp: Date.now() 
+          startedAt: finalStartedAt,
+          expiresAt: finalExpiresAt,
+          timestamp: now,
+          roomId: roomIdRef.current
         });
       }
     } else {
@@ -1015,10 +1096,10 @@ export function FightGame() {
     sfx.meterFull();
   }, [setPose]);
 
-  // Monitor HP to trigger Ultimate Comeback
+  // Monitor HP to trigger Ultimate Comeback (Round 2 only)
   useEffect(() => {
     if (phase !== "fight") return;
-    if (round < 2) return;
+    if (round !== 2) return;
     if (ultimateActive || ultimateExecuting || ultimateTriggeredThisRound) return;
 
     if (playerHp <= 30 && playerHp > 0) {
@@ -1027,6 +1108,39 @@ export function FightGame() {
       triggerUltimateComeback("opponent");
     }
   }, [playerHp, enemyHp, phase, round, ultimateActive, ultimateExecuting, ultimateTriggeredThisRound, triggerUltimateComeback]);
+
+  // Ultimate countdown timer interval
+  useEffect(() => {
+    if (!ultimateActive || !ultimateExpiresAt) {
+      setUltimateTimeLeft(15.0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, (ultimateExpiresAt - Date.now()) / 1000);
+      setUltimateTimeLeft(remaining);
+
+      if (remaining <= 0) {
+        clearInterval(interval);
+        
+        // Expiration logic
+        if (ultimateOwner === "player" && !ultimateExecuting) {
+          net.emit("ultimate:expire", {
+            roundId: roundRef.current,
+            ownerId: net.getId(),
+            roomId: roomIdRef.current
+          });
+          
+          setUltimateActive(false);
+          setUltimateOwner(null);
+          setTyped("");
+          setCurrentMove(generateMove());
+        }
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [ultimateActive, ultimateExpiresAt, ultimateOwner, ultimateExecuting]);
 
   // KO detection
   useEffect(() => {
@@ -1274,11 +1388,14 @@ export function FightGame() {
                       </span>
                     ))}
                   </div>
-                  <div className="text-sm tracking-[0.2em] text-white/80 font-bold">
+                  <div className="text-sm tracking-[0.2em] text-white/80 font-bold mb-2">
                     TYPE THE SEQUENCE
                   </div>
-                  <div className="text-xl font-black mt-2 text-[var(--neon-yellow)]" style={{ textShadow: "0 0 8px var(--neon-yellow)" }}>
+                  <div className="text-xl font-black text-[var(--neon-yellow)]" style={{ textShadow: "0 0 8px var(--neon-yellow)" }}>
                     {ultimateProgress} / 15
+                  </div>
+                  <div className="text-lg font-black mt-2 text-white animate-pulse">
+                    {ultimateTimeLeft.toFixed(1)}s
                   </div>
                 </>
               ) : (
@@ -1286,8 +1403,11 @@ export function FightGame() {
                   <div className="text-lg tracking-[0.2em] text-white/90 font-bold my-4 text-center">
                     OPPONENT IS CHARGING...
                   </div>
-                  <div className="text-2xl font-black text-[var(--neon-pink)] animate-bounce" style={{ textShadow: "0 0 8px var(--neon-pink)" }}>
+                  <div className="text-2xl font-black text-[var(--neon-pink)]" style={{ textShadow: "0 0 8px var(--neon-pink)" }}>
                     {opponentUltimateProgress} / 15
+                  </div>
+                  <div className="text-lg font-black mt-2 text-white animate-pulse">
+                    {ultimateTimeLeft.toFixed(1)}s
                   </div>
                 </>
               )}
