@@ -182,9 +182,6 @@ function HealthBar({
   side,
   combo,
   meter,
-  ultimateProgress = 0,
-  ultimateReady = false,
-  showUltimate = false,
 }: {
   hp: number;
   max: number;
@@ -192,9 +189,6 @@ function HealthBar({
   side: "left" | "right";
   combo: number;
   meter: number;
-  ultimateProgress?: number;
-  ultimateReady?: boolean;
-  showUltimate?: boolean;
 }) {
   const pct = Math.max(0, hp) / max * 100;
   const color = pct > 60 ? "var(--hp-green)" : pct > 30 ? "var(--hp-orange)" : "var(--hp-red)";
@@ -227,29 +221,6 @@ function HealthBar({
           }}
         />
       </div>
-      {showUltimate && (
-        <div className={`mt-1 flex flex-col ${side === "right" ? "items-end" : "items-start"} w-2/3`}>
-          <div className="text-[10px] tracking-widest font-black transition-all" style={{
-            color: ultimateReady ? "var(--neon-yellow)" : "var(--neon-pink)",
-            textShadow: ultimateReady ? "0 0 8px var(--neon-yellow)" : undefined,
-          }}>
-            {ultimateReady ? "⚡ ULTIMATE READY ⚡" : `ULTIMATE CHARGE: ${ultimateProgress}/15`}
-          </div>
-          <div className="relative w-full h-2 border mt-0.5" style={{ borderColor: ultimateReady ? "var(--neon-yellow)" : "var(--neon-pink)", background: "rgba(0,0,0,0.6)" }}>
-            <div
-              className="absolute top-0 h-full transition-all duration-300"
-              style={{
-                width: `${(ultimateProgress / 15) * 100}%`,
-                [side === "right" ? "right" : "left"]: 0,
-                background: ultimateReady
-                  ? "linear-gradient(90deg, var(--neon-yellow), #ffa500)"
-                  : "linear-gradient(90deg, var(--neon-pink), var(--neon-purple))",
-                boxShadow: ultimateReady ? "0 0 8px var(--neon-yellow)" : "0 0 6px var(--neon-pink)",
-              }}
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -267,14 +238,18 @@ export function FightGame() {
   const [playerRoundWins, setPlayerRoundWins] = useState(0);
   const [opponentRoundWins, setOpponentRoundWins] = useState(0);
 
-  // Ultimate mechanic states
-  const [ultimateCorrectLetters, setUltimateCorrectLetters] = useState(0);
-  const [opponentUltimateCorrectLetters, setOpponentUltimateCorrectLetters] = useState(0);
+  // Match host state
+  const [isHost, setIsHost] = useState(false);
+  const isHostRef = useRef(false);
+
+  // Ultimate Comeback states
+  const [ultimateActive, setUltimateActive] = useState(false);
+  const [ultimateExecuting, setUltimateExecuting] = useState(false);
+  const [ultimateOwner, setUltimateOwner] = useState<"player" | "opponent" | null>(null);
+  const [ultimateProgress, setUltimateProgress] = useState(0);
+  const [opponentUltimateProgress, setOpponentUltimateProgress] = useState(0);
   const [ultimateSequence, setUltimateSequence] = useState<string[]>([]);
-  const [ultimateReady, setUltimateReady] = useState(false);
-  const [opponentUltimateReady, setOpponentUltimateReady] = useState(false);
-  const [ultimateActivated, setUltimateActivated] = useState(false);
-  const [opponentUltimateActivated, setOpponentUltimateActivated] = useState(false);
+  const [ultimateTriggeredThisRound, setUltimateTriggeredThisRound] = useState(false);
 
   // Overlay for round complete transition
   const [roundTransitionOverlay, setRoundTransitionOverlay] = useState<{
@@ -287,6 +262,7 @@ export function FightGame() {
   // Event guards to prevent race condition double triggers
   const processedRoundsRef = useRef<Set<number>>(new Set());
   const transitionedRoundsRef = useRef<Set<number>>(new Set());
+  const processedUltimateExecutionsRef = useRef<Set<string>>(new Set());
   const matchEndedRef = useRef(false);
 
   const [playerHp, setPlayerHp] = useState(100);
@@ -324,15 +300,28 @@ export function FightGame() {
   const roundRef = useRef(round);
   const playerRoundWinsRef = useRef(playerRoundWins);
   const opponentRoundWinsRef = useRef(opponentRoundWins);
-  const ultimateReadyRef = useRef(ultimateReady);
+  const playerHpRef = useRef(playerHp);
+  const enemyHpRef = useRef(enemyHp);
+  const ultimateActiveRef = useRef(ultimateActive);
+  const ultimateExecutingRef = useRef(ultimateExecuting);
+  const ultimateOwnerRef = useRef(ultimateOwner);
+  const ultimateProgressRef = useRef(ultimateProgress);
+  const ultimateTriggeredThisRoundRef = useRef(ultimateTriggeredThisRound);
 
+  useEffect(() => { isHostRef.current = isHost; }, [isHost]);
   useEffect(() => { defensePoseRef.current = defensePose; }, [defensePose]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
   useEffect(() => { roundRef.current = round; }, [round]);
   useEffect(() => { playerRoundWinsRef.current = playerRoundWins; }, [playerRoundWins]);
   useEffect(() => { opponentRoundWinsRef.current = opponentRoundWins; }, [opponentRoundWins]);
-  useEffect(() => { ultimateReadyRef.current = ultimateReady; }, [ultimateReady]);
+  useEffect(() => { playerHpRef.current = playerHp; }, [playerHp]);
+  useEffect(() => { enemyHpRef.current = enemyHp; }, [enemyHp]);
+  useEffect(() => { ultimateActiveRef.current = ultimateActive; }, [ultimateActive]);
+  useEffect(() => { ultimateExecutingRef.current = ultimateExecuting; }, [ultimateExecuting]);
+  useEffect(() => { ultimateOwnerRef.current = ultimateOwner; }, [ultimateOwner]);
+  useEffect(() => { ultimateProgressRef.current = ultimateProgress; }, [ultimateProgress]);
+  useEffect(() => { ultimateTriggeredThisRoundRef.current = ultimateTriggeredThisRound; }, [ultimateTriggeredThisRound]);
 
   const poseTimerRef = useRef<number | null>(null);
   const enemyPoseTimerRef = useRef<number | null>(null);
@@ -411,13 +400,14 @@ export function FightGame() {
     setFlash(null);
 
     // Reset ultimate states
-    setUltimateCorrectLetters(0);
-    setOpponentUltimateCorrectLetters(0);
-    setUltimateReady(false);
-    setOpponentUltimateReady(false);
-    setUltimateActivated(false);
-    setOpponentUltimateActivated(false);
-    setUltimateSequence(generateUltimateSequence());
+    setUltimateActive(false);
+    setUltimateExecuting(false);
+    setUltimateOwner(null);
+    setUltimateProgress(0);
+    setOpponentUltimateProgress(0);
+    setUltimateSequence([]);
+    setUltimateTriggeredThisRound(false);
+    processedUltimateExecutionsRef.current.clear();
   }, []);
 
   // Safe round transition using a guard
@@ -506,108 +496,124 @@ export function FightGame() {
 
   // Execute ultimate logic
   const executeUltimate = () => {
-    if (!ultimateReadyRef.current || ultimateActivated) return;
-    setUltimateActivated(true);
+    if (ultimateExecuting) return;
+    setUltimateExecuting(true);
 
-    const currentRound = roundRef.current;
-    const damage = currentRound === 3 ? 100 : 50;
+    const damage = 50;
+    const executionId = "exec_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+    processedUltimateExecutionsRef.current.add(executionId);
 
     // Visuals/Audio locally
     setPose("player", "special", 1500);
     sfx.hitSpecial();
-    triggerShake(currentRound === 3 ? 2 : 1.2);
+    triggerShake(1.2);
+    setFlash("⚡ ULTIMATE EXECUTED ⚡");
 
-    if (currentRound === 3) {
-      setPhase("ready"); // lock input
-      setEnemyPose("hurt");
-      setEnemyIncoming(null);
-      setFlash("⚡ ULTIMATE EXECUTED ⚡");
-
-      // Spawn massive sparks / particle effects
-      for (let i = 0; i < 5; i++) {
-        setTimeout(() => {
-          addSpark("right", "var(--neon-pink)");
-          addFloat("FINAL BLOW!", "right", "var(--neon-pink)", 36);
-        }, i * 200);
-      }
-
-      // Deduct HP to finish match
-      setTimeout(() => {
-        setEnemyHp(0);
-        net.emit("opponent:hp", { hp: 0, roomId: roomIdRef.current });
-      }, 1200);
-    } else {
-      // Round 2
+    // Spawn massive sparks / particle effects on opponent
+    for (let i = 0; i < 5; i++) {
       setTimeout(() => {
         addSpark("right", "var(--neon-pink)");
-        addFloat("-50", "right", "var(--neon-pink)", 40);
-        setEnemyHp(hp => {
-          const next = Math.max(0, hp - damage);
-          net.emit("opponent:hp", { hp: next, roomId: roomIdRef.current });
-          return next;
-        });
-      }, 300);
+        addFloat("CRITICAL HIT!", "right", "var(--neon-pink)", 36);
+      }, i * 200);
     }
 
+    // Apply damage and handle KO/Survival
+    setTimeout(() => {
+      setEnemyHp(hp => {
+        const next = Math.max(0, hp - damage);
+        net.emit("opponent:hp", { hp: next, roomId: roomIdRef.current });
+        
+        if (next <= 0) {
+          // KO sequence
+          setEnemyPose("ko");
+          setSlowmo(true);
+          setFlash("K.O.");
+          sfx.koFlash();
+          setTimeout(() => {
+            setSlowmo(false);
+            setFlash(null);
+            handleRoundEnd("player");
+          }, 1200);
+        } else {
+          // Survive: exit ultimate mode, return to normal combat
+          setUltimateActive(false);
+          setUltimateOwner(null);
+          setUltimateExecuting(false);
+          setTyped("");
+          setCurrentMove(generateMove());
+          setFlash(null);
+        }
+        return next;
+      });
+    }, 1000);
+
     // Broadcast execute
-    net.emit("ultimate:execute", { round: currentRound, damage, roomId: roomIdRef.current });
+    net.emit("ultimate:execute", { 
+      roundId: roundRef.current, 
+      ownerId: net.getId(), 
+      executionId,
+      damage, 
+      roomId: roomIdRef.current 
+    });
   };
 
-  // Listen to keyboard inputs for ultimate charging
+  // Listen to keyboard inputs
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (phase !== "fight") return;
 
-    // Check for Ultimate manual execution (Space key)
-    if (ultimateReadyRef.current && !ultimateActivated && e.key === " ") {
-      e.preventDefault();
-      executeUltimate();
+    if (ultimateActive) {
+      if (ultimateOwner === "player" && !ultimateExecuting) {
+        const key = e.key.toUpperCase();
+        if (key.length === 1 && /^[A-Z]$/.test(key)) {
+          e.preventDefault();
+          const targetChar = ultimateSequence[0];
+          if (key === targetChar) {
+            // Correct letter!
+            const nextProgress = ultimateProgress + 1;
+            setUltimateProgress(nextProgress);
+
+            net.emit("ultimate:progress", { 
+              roundId: roundRef.current, 
+              ownerId: net.getId(), 
+              progress: nextProgress, 
+              roomId: roomIdRef.current 
+            });
+
+            if (nextProgress >= 15) {
+              executeUltimate();
+            } else {
+              sfx.typeKey();
+              // Shift letters
+              setUltimateSequence(prev => {
+                const next = prev.slice(1);
+                return [...next, getRandomLetter()];
+              });
+            }
+          } else {
+            // Incorrect letter: feedback but no HP penalty or combo resets
+            sfx.typeMiss();
+          }
+        } else {
+          e.preventDefault();
+        }
+      } else {
+        // If opponent is executing or charging, block all keys
+        e.preventDefault();
+      }
       return;
     }
 
     const key = e.key.toUpperCase();
     if (key.length !== 1) return; // ignore control keys
-
-    const currentRound = roundRef.current;
-    const isUltimateRound = currentRound >= 2;
-
-    if (isUltimateRound && !ultimateReadyRef.current) {
-      const currentTargetLetter = ultimateSequence[0];
-      if (key === currentTargetLetter) {
-        // Advance ultimate progress
-        setUltimateCorrectLetters(prev => {
-          const next = Math.min(15, prev + 1);
-          if (next >= 15) {
-            setUltimateReady(true);
-            sfx.meterFull();
-            net.emit("ultimate:ready", { roomId: roomIdRef.current });
-          } else {
-            sfx.typeKey();
-          }
-          net.emit("ultimate:progress", { progress: next, roomId: roomIdRef.current });
-          return next;
-        });
-
-        // Shift letters
-        setUltimateSequence(prev => {
-          const next = prev.slice(1);
-          return [...next, getRandomLetter()];
-        });
-
-        // Determine if key also matches the next character of the normal word
-        const targetWord = currentMove.word.toUpperCase();
-        const nextWordChar = targetWord[typed.length];
-        
-        // If it DOES NOT match the normal word, preventDefault to avoid triggering a miss!
-        if (key !== nextWordChar) {
-          e.preventDefault();
-        }
-      }
-    }
   };
 
   // Handle typing input during fight
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (phase !== "fight") return;
+    if (ultimateActive) {
+      setTyped("");
+      return;
+    }
     const val = e.target.value.toLowerCase();
     const target = currentMove.word.toLowerCase();
 
@@ -615,13 +621,16 @@ export function FightGame() {
     if (!target.startsWith(val)) {
       setPose("player", "hurt", 250);
       setCombo(0);
-      setPlayerHp(hp => Math.max(0, hp - 2));
+      setPlayerHp(hp => {
+        const next = Math.max(0, hp - 2);
+        net.emit("opponent:hp", { hp: next, roomId: roomIdRef.current });
+        return next;
+      });
       addFloat("MISS", "left", "var(--hp-red)", 22);
       setTyped("");
       setCurrentMove(generateMove());
       windupSentRef.current = false;
       net.emit("opponent:miss", { roomId: roomIdRef.current });
-      setPlayerHp(hp => { net.emit("opponent:hp", { hp, roomId: roomIdRef.current }); return hp; });
       sfx.typeMiss();
       return;
     }
@@ -693,13 +702,15 @@ export function FightGame() {
     setRound(1);
     setPlayerRoundWins(0);
     setOpponentRoundWins(0);
-    setUltimateCorrectLetters(0);
-    setOpponentUltimateCorrectLetters(0);
-    setUltimateReady(false);
-    setOpponentUltimateReady(false);
-    setUltimateActivated(false);
-    setOpponentUltimateActivated(false);
-    setUltimateSequence(generateUltimateSequence());
+    
+    setUltimateActive(false);
+    setUltimateExecuting(false);
+    setUltimateOwner(null);
+    setUltimateProgress(0);
+    setOpponentUltimateProgress(0);
+    setUltimateSequence([]);
+    setUltimateTriggeredThisRound(false);
+    processedUltimateExecutionsRef.current.clear();
     
     processedRoundsRef.current.clear();
     transitionedRoundsRef.current.clear();
@@ -866,56 +877,89 @@ export function FightGame() {
       }
     });
 
-    const offUltimateProgress = net.on("ultimate:progress", ({ progress, roomId: eventRoomId }) => {
+    const offUltimateActivate = net.on("ultimate:activate", ({ roundId, ownerId, timestamp, roomId: eventRoomId }) => {
       if (eventRoomId && roomIdRef.current && eventRoomId !== roomIdRef.current) return;
-      setOpponentUltimateCorrectLetters(progress);
+      if (roundId !== roundRef.current) return;
+
+      const myId = net.getId();
+      const isOpponent = ownerId !== myId;
+
+      if (ultimateActiveRef.current) {
+        if (ultimateOwnerRef.current === "player" && isOpponent) {
+          const myTimestamp = Date.now();
+          const incomingWins = (timestamp < myTimestamp) || (timestamp === myTimestamp && ownerId < myId);
+          if (incomingWins) {
+            triggerUltimateComeback("opponent", true);
+          }
+        }
+        return;
+      }
+
+      if (isOpponent) {
+        triggerUltimateComeback("opponent", true);
+      } else {
+        triggerUltimateComeback("player", true);
+      }
     });
 
-    const offUltimateReady = net.on("ultimate:ready", (payload) => {
-      if (payload?.roomId && roomIdRef.current && payload.roomId !== roomIdRef.current) return;
-      setOpponentUltimateReady(true);
-      sfx.meterFull();
+    const offUltimateProgress = net.on("ultimate:progress", ({ roundId, ownerId, progress, roomId: eventRoomId }) => {
+      if (eventRoomId && roomIdRef.current && eventRoomId !== roomIdRef.current) return;
+      if (roundId !== roundRef.current) return;
+      if (ownerId !== net.getId()) {
+        setOpponentUltimateProgress(progress);
+      }
     });
 
-    const offUltimateExecute = net.on("ultimate:execute", ({ round: eventRound, damage, roomId: eventRoomId }) => {
+    const offUltimateExecute = net.on("ultimate:execute", ({ roundId, ownerId, executionId, damage, roomId: eventRoomId }) => {
       if (eventRoomId && roomIdRef.current && eventRoomId !== roomIdRef.current) return;
-      
-      setOpponentUltimateActivated(true);
+      if (roundId !== roundRef.current) return;
+      if (processedUltimateExecutionsRef.current.has(executionId)) return;
+      processedUltimateExecutionsRef.current.add(executionId);
+
+      setUltimateExecuting(true);
       setPose("enemy", "special", 1500);
       sfx.hitSpecial();
-      triggerShake(eventRound === 3 ? 2 : 1.2);
+      triggerShake(1.2);
+      setFlash("⚡ OPPONENT ULTIMATE! ⚡");
 
-      if (eventRound === 3) {
-        setPhase("ready"); // lock input
-        setPlayerPose("hurt");
-        setEnemyIncoming(null);
-        setFlash("⚡ OPPONENT ULTIMATE! ⚡");
-
-        // Spawn massive particles / sparks on player side
-        for (let i = 0; i < 5; i++) {
-          setTimeout(() => {
-            addSpark("left", "var(--neon-cyan)");
-            addFloat("CRITICAL HIT!", "left", "var(--hp-red)", 36);
-          }, i * 200);
-        }
-
-        // Apply 100 damage after the animation ends
-        setTimeout(() => {
-          setPlayerHp(0);
-          net.emit("opponent:hp", { hp: 0, roomId: roomIdRef.current });
-        }, 1200);
-      } else {
-        // Round 2
+      // Spawn massive particles / sparks on player side
+      for (let i = 0; i < 5; i++) {
         setTimeout(() => {
           addSpark("left", "var(--neon-cyan)");
-          addFloat(`-${damage}`, "left", "var(--hp-red)", 40);
-          setPlayerHp(hp => {
-            const next = Math.max(0, hp - damage);
-            net.emit("opponent:hp", { hp: next, roomId: roomIdRef.current });
-            return next;
-          });
-        }, 300);
+          addFloat("CRITICAL HIT!", "left", "var(--hp-red)", 36);
+        }, i * 200);
       }
+
+      // Apply damage after the animation ends
+      setTimeout(() => {
+        setPlayerHp(hp => {
+          const next = Math.max(0, hp - damage);
+          net.emit("opponent:hp", { hp: next, roomId: roomIdRef.current });
+
+          if (next <= 0) {
+            // KO sequence
+            setPlayerPose("ko");
+            setSlowmo(true);
+            setFlash("DEFEAT");
+            sfx.koFlash();
+            setTimeout(() => {
+              setSlowmo(false);
+              setFlash(null);
+              handleRoundEnd("opponent");
+            }, 1200);
+          } else {
+            // Survived: exit ultimate mode, return to normal combat
+            setUltimateActive(false);
+            setUltimateOwner(null);
+            setUltimateExecuting(false);
+            setTyped("");
+            setCurrentMove(generateMove());
+            setFlash(null);
+          }
+
+          return next;
+        });
+      }, 1000);
     });
 
     return () => {
@@ -931,8 +975,8 @@ export function FightGame() {
       offRoundWon();
       offRoundTransition();
       offMatchWon();
+      offUltimateActivate();
       offUltimateProgress();
-      offUltimateReady();
       offUltimateExecute();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -944,9 +988,50 @@ export function FightGame() {
     net.emit("opponent:stats", { combo, meter, roomId: roomIdRef.current });
   }, [combo, meter, phase]);
 
+  const triggerUltimateComeback = useCallback((owner: "player" | "opponent", fromNetwork = false) => {
+    ultimateActiveRef.current = true;
+    ultimateOwnerRef.current = owner;
+    ultimateTriggeredThisRoundRef.current = true;
+
+    setUltimateActive(true);
+    setUltimateOwner(owner);
+    setUltimateProgress(0);
+    setOpponentUltimateProgress(0);
+    setUltimateTriggeredThisRound(true);
+    setUltimateSequence(generateUltimateSequence());
+
+    if (owner === "player") {
+      setPose("player", "special", 5000);
+      if (!fromNetwork) {
+        net.emit("ultimate:activate", { 
+          roundId: roundRef.current, 
+          ownerId: net.getId(), 
+          timestamp: Date.now() 
+        });
+      }
+    } else {
+      setPose("enemy", "special", 5000);
+    }
+    sfx.meterFull();
+  }, [setPose]);
+
+  // Monitor HP to trigger Ultimate Comeback
+  useEffect(() => {
+    if (phase !== "fight") return;
+    if (round < 2) return;
+    if (ultimateActive || ultimateExecuting || ultimateTriggeredThisRound) return;
+
+    if (playerHp <= 30 && playerHp > 0) {
+      triggerUltimateComeback("player");
+    } else if (enemyHp <= 30 && enemyHp > 0) {
+      triggerUltimateComeback("opponent");
+    }
+  }, [playerHp, enemyHp, phase, round, ultimateActive, ultimateExecuting, ultimateTriggeredThisRound, triggerUltimateComeback]);
+
   // KO detection
   useEffect(() => {
     if (phase !== "fight") return;
+    if (ultimateExecuting) return;
     if (enemyHp <= 0) {
       setEnemyPose("ko");
       setSlowmo(true);
@@ -984,6 +1069,7 @@ export function FightGame() {
     roomIdRef.current = id;
     setRoomError(null);
     setIsJoining(false);
+    setIsHost(true);
     net.createRoomPeer(id);
     setPhase("hosting");
   };
@@ -1003,6 +1089,7 @@ export function FightGame() {
     net.connect();
     const myId = net.getId() || Math.random().toString(36).substring(2);
 
+    setIsHost(false);
     net.joinRoomPeer(id, (success) => {
       if (success) {
         net.emit("room:join_request", { roomId: id, senderId: myId });
@@ -1046,6 +1133,7 @@ export function FightGame() {
     setJoinInput("");
     setRoomError(null);
     setIsJoining(false);
+    setIsHost(false);
     if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
     
     // Reset match states
@@ -1073,7 +1161,18 @@ export function FightGame() {
     setOpponentRoundWins(0);
     processedRoundsRef.current.clear();
     transitionedRoundsRef.current.clear();
+    processedUltimateExecutionsRef.current.clear();
     matchEndedRef.current = false;
+
+    setUltimateActive(false);
+    setUltimateExecuting(false);
+    setUltimateOwner(null);
+    setUltimateProgress(0);
+    setOpponentUltimateProgress(0);
+    setUltimateSequence([]);
+    setUltimateTriggeredThisRound(false);
+
+    setIsHost(false);
     openLobby();
   };
 
@@ -1113,9 +1212,6 @@ export function FightGame() {
             side="left"
             combo={combo}
             meter={meter}
-            ultimateProgress={ultimateCorrectLetters}
-            ultimateReady={ultimateReady}
-            showUltimate={round >= 2}
           />
           <div className="flex flex-col items-center px-3 min-w-[140px]">
             <div className="text-[10px] tracking-[0.3em] opacity-70">ROUND {round}</div>
@@ -1131,9 +1227,6 @@ export function FightGame() {
             side="right"
             combo={enemyCombo}
             meter={enemyMeter}
-            ultimateProgress={opponentUltimateCorrectLetters}
-            ultimateReady={opponentUltimateReady}
-            showUltimate={round >= 2}
           />
         </div>
       </header>
@@ -1144,9 +1237,67 @@ export function FightGame() {
         <div className="relative">
           <FighterSprite side="left" pose={playerPose} hurt={playerPose === "hurt"} color="oklch(0.35 0.2 260)" accent="var(--neon-cyan)" />
         </div>
+
+        {/* Center Ultimate Panel */}
+        {ultimateActive && (
+          <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center z-30 pointer-events-none">
+            <div className="px-10 py-8 border-4 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center animate-scale-up"
+                 style={{
+                   borderColor: ultimateOwner === "player" ? "var(--neon-yellow)" : "var(--neon-pink)",
+                   boxShadow: `0 0 40px ${ultimateOwner === "player" ? "var(--neon-yellow)" : "var(--neon-pink)"}`,
+                   pointerEvents: "auto"
+                 }}>
+              <div className="text-2xl md:text-3xl font-black tracking-[0.4em] mb-4 text-center animate-pulse"
+                   style={{
+                     color: ultimateOwner === "player" ? "var(--neon-yellow)" : "var(--neon-pink)",
+                     textShadow: `0 0 12px ${ultimateOwner === "player" ? "var(--neon-yellow)" : "var(--neon-pink)"}`
+                   }}>
+                ⚡ ULTIMATE COMEBACK ⚡
+              </div>
+              
+              {ultimateOwner === "player" ? (
+                <>
+                  <div className="flex gap-4 my-6">
+                    {ultimateSequence.slice(0, 5).map((char, index) => (
+                      <span
+                        key={index}
+                        className={`px-5 py-3 border-2 text-2xl font-black tracking-normal transition-all duration-200 ${
+                          index === 0
+                            ? "bg-[var(--neon-yellow)] text-black border-[var(--neon-yellow)] scale-125"
+                            : "border-white/20 text-white/50"
+                        }`}
+                        style={index === 0 ? {
+                          boxShadow: "0 0 20px var(--neon-yellow)",
+                        } : undefined}
+                      >
+                        {char}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="text-sm tracking-[0.2em] text-white/80 font-bold">
+                    TYPE THE SEQUENCE
+                  </div>
+                  <div className="text-xl font-black mt-2 text-[var(--neon-yellow)]" style={{ textShadow: "0 0 8px var(--neon-yellow)" }}>
+                    {ultimateProgress} / 15
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-lg tracking-[0.2em] text-white/90 font-bold my-4 text-center">
+                    OPPONENT IS CHARGING...
+                  </div>
+                  <div className="text-2xl font-black text-[var(--neon-pink)] animate-bounce" style={{ textShadow: "0 0 8px var(--neon-pink)" }}>
+                    {opponentUltimateProgress} / 15
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Enemy */}
         <div className="relative">
-          {enemyIncoming && (
+          {enemyIncoming && !ultimateActive && (
             <div className="absolute -top-8 right-1/2 translate-x-1/2 text-xs font-bold px-2 py-1 border" style={{ borderColor: "var(--neon-pink)", color: "var(--neon-pink)", background: "rgba(0,0,0,0.6)" }}>
               ! {enemyIncoming.toUpperCase()} !
             </div>
@@ -1209,82 +1360,83 @@ export function FightGame() {
 
       {/* Bottom typing dock */}
       <footer className="relative z-20 mt-6 px-6 pb-6">
-        <div className="mx-auto max-w-4xl border-2 p-4" style={{ borderColor: currentMove.color, background: "rgba(0,0,0,0.65)", boxShadow: `0 0 24px ${currentMove.color}` }}>
-          <div className="flex items-center justify-between text-xs tracking-[0.3em] opacity-80">
-            <span style={{ color: currentMove.color, textShadow: "0 0 8px currentColor" }}>▶ {currentMove.label}</span>
-            <span>DMG {currentMove.damage} · COMBO x{combo} · BEST {best}</span>
-          </div>
-          <div className="mt-3 flex items-center gap-2 text-4xl md:text-5xl font-black tracking-[0.15em]">
-            {currentMove.word.split("").map((ch, i) => {
-              const done = i < typed.length;
-              const current = i === typed.length;
-              return (
-                <span
-                  key={i}
-                  style={{
-                    color: done ? currentMove.color : current ? "white" : "rgba(255,255,255,0.35)",
-                    textShadow: done ? `0 0 12px ${currentMove.color}` : current ? "0 0 8px white" : undefined,
-                    borderBottom: current ? `3px solid ${currentMove.color}` : undefined,
-                  }}
-                >
-                  {ch.toUpperCase()}
-                </span>
-              );
-            })}
-          </div>
-          <div className="mt-3 h-1 w-full" style={{ background: "rgba(255,255,255,0.1)" }}>
-            <div className="h-full transition-all duration-100" style={{ width: `${progress}%`, background: currentMove.color, boxShadow: `0 0 10px ${currentMove.color}` }} />
-          </div>
-          {round >= 2 && (
-            <div className="mt-4 pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-black tracking-widest" style={{ color: "var(--neon-yellow)", textShadow: "0 0 6px var(--neon-yellow)" }}>
-                  ULTIMATE KEYSTREAM:
-                </span>
-                <div className="flex gap-2">
-                  {ultimateSequence.map((char, index) => (
-                    <span
-                      key={index}
-                      className={`px-2.5 py-0.5 border text-sm font-black tracking-normal transition-all duration-200 ${
-                        index === 0
-                          ? "bg-[var(--neon-yellow)] text-black border-[var(--neon-yellow)] scale-110"
-                          : "border-white/20 text-white/50"
-                      }`}
-                      style={index === 0 ? {
-                        backgroundColor: "var(--neon-yellow)",
-                        color: "black",
-                        borderColor: "var(--neon-yellow)",
-                        boxShadow: "0 0 10px var(--neon-yellow)",
-                        transform: "scale(1.1)",
-                      } : undefined}
-                    >
-                      {char}
-                    </span>
-                  ))}
+        {ultimateActive ? (
+          <div className="mx-auto max-w-4xl border-2 p-6 text-center" 
+               style={{ 
+                 borderColor: ultimateOwner === "player" ? "var(--neon-yellow)" : "var(--neon-pink)", 
+                 background: "rgba(0,0,0,0.85)", 
+                 boxShadow: `0 0 32px ${ultimateOwner === "player" ? "var(--neon-yellow)" : "var(--neon-pink)"}` 
+               }}>
+            {ultimateOwner === "player" ? (
+              <>
+                <div className="text-sm font-black tracking-[0.3em] text-[var(--neon-yellow)] animate-pulse">
+                  ⚡ ULTIMATE COMEBACK ACTIVE ⚡
                 </div>
-              </div>
-              {ultimateReady ? (
-                <div className="text-sm font-black tracking-widest animate-pulse flex items-center gap-2" style={{ color: "var(--neon-yellow)", textShadow: "0 0 8px var(--neon-yellow)" }}>
-                  <span>⚡</span>
-                  <span>PRESS SPACE TO EXECUTE</span>
-                  <span>⚡</span>
+                <div className="text-xs opacity-75 mt-1 tracking-widest">
+                  TYPE THE CENTER KEYSTREAM TO UNLEASH YOUR ULTIMATE ATTACK!
                 </div>
-              ) : (
-                <span className="text-xs opacity-60">CHARGE: {ultimateCorrectLetters}/15</span>
-              )}
+              </>
+            ) : (
+              <>
+                <div className="text-sm font-black tracking-[0.3em] text-[var(--neon-pink)] animate-pulse">
+                  ⚠️ OPPONENT ULTIMATE ACTIVE ⚠️
+                </div>
+                <div className="text-xs opacity-75 mt-1 tracking-widest">
+                  BRACE YOURSELF! OPPONENT IS TYPING THEIR ULTIMATE COMEBACK!
+                </div>
+              </>
+            )}
+            <input
+              ref={inputRef}
+              value=""
+              onChange={onChange}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              aria-label="Type the ultimate move"
+              className="sr-only"
+            />
+          </div>
+        ) : (
+          <div className="mx-auto max-w-4xl border-2 p-4" style={{ borderColor: currentMove.color, background: "rgba(0,0,0,0.65)", boxShadow: `0 0 24px ${currentMove.color}` }}>
+            <div className="flex items-center justify-between text-xs tracking-[0.3em] opacity-80">
+              <span style={{ color: currentMove.color, textShadow: "0 0 8px currentColor" }}>▶ {currentMove.label}</span>
+              <span>DMG {currentMove.damage} · COMBO x{combo} · BEST {best}</span>
             </div>
-          )}
-          <input
-            ref={inputRef}
-            value={typed}
-            onChange={onChange}
-            onKeyDown={handleKeyDown}
-            autoFocus
-            aria-label="Type the move"
-            className="sr-only"
-          />
-        </div>
-        <p className="text-center text-xs opacity-60 mt-3 tracking-widest">TYPE THE WORD TO ATTACK · BLOCK/DODGE WHEN OPPONENT WINDS UP · CHAIN COMBOS FOR ULTIMATES</p>
+            <div className="mt-3 flex items-center gap-2 text-4xl md:text-5xl font-black tracking-[0.15em]">
+              {currentMove.word.split("").map((ch, i) => {
+                const done = i < typed.length;
+                const current = i === typed.length;
+                return (
+                  <span
+                    key={i}
+                    style={{
+                      color: done ? currentMove.color : current ? "white" : "rgba(255,255,255,0.35)",
+                      textShadow: done ? `0 0 12px ${currentMove.color}` : current ? "0 0 8px white" : undefined,
+                      borderBottom: current ? `3px solid ${currentMove.color}` : undefined,
+                    }}
+                  >
+                    {ch.toUpperCase()}
+                  </span>
+                );
+              })}
+            </div>
+            <div className="mt-3 h-1 w-full" style={{ background: "rgba(255,255,255,0.1)" }}>
+              <div className="h-full transition-all duration-100" style={{ width: `${progress}%`, background: currentMove.color, boxShadow: `0 0 10px ${currentMove.color}` }} />
+            </div>
+            <input
+              ref={inputRef}
+              value={typed}
+              onChange={onChange}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              aria-label="Type the move"
+              className="sr-only"
+            />
+          </div>
+        )}
+        <p className="text-center text-xs opacity-60 mt-3 tracking-widest">
+          {ultimateActive ? "TYPING COMBAT FROZEN · COMPLETE THE KEYSTREAM" : "TYPE THE WORD TO ATTACK · BLOCK/DODGE WHEN OPPONENT WINDS UP"}
+        </p>
       </footer>
 
       {/* Round transition overlay */}
