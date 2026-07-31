@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sfx, unlockAudio, setMuted, isMuted } from "@/lib/chiptune";
 import { net, type NetMove, generateRoomId } from "@/lib/net";
 import { SpriteAnimation, type FighterPose } from "./SpriteAnimation";
+import { UltimateCinematic } from "./UltimateCinematic";
 
 type MoveType = "punch" | "kick" | "block" | "dodge" | "dash" | "aerial" | "special";
 type Fighter = "player" | "enemy";
@@ -81,10 +82,12 @@ function FighterSprite({
   side,
   pose,
   hurt,
+  colorCycleIndex = 0,
 }: {
   side: "left" | "right";
   pose: FighterPose;
   hurt: boolean;
+  colorCycleIndex?: number;
   color?: string;
   accent?: string;
 }) {
@@ -95,6 +98,7 @@ function FighterSprite({
       pose={pose}
       side={side}
       hurt={hurt}
+      colorCycleIndex={colorCycleIndex}
     />
   );
 }
@@ -249,6 +253,16 @@ export function FightGame() {
   const idRef = useRef(0);
   const healthWarnRef = useRef(false);
   const [audioMuted, setAudioMuted] = useState(false);
+  const [cinematicAttacker, setCinematicAttacker] = useState<"left" | "right" | null>(null);
+  const [colorCycleIndex, setColorCycleIndex] = useState(0);
+
+  useEffect(() => {
+    if (!cinematicAttacker) return;
+    const timer = setInterval(() => {
+      setColorCycleIndex((prev) => (prev + 1) % 6);
+    }, 75);
+    return () => clearInterval(timer);
+  }, [cinematicAttacker]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const inputRoomRef = useRef<HTMLInputElement>(null);
@@ -475,37 +489,25 @@ export function FightGame() {
     }
   }, [transitionToRound]);
 
-  // Execute ultimate logic
-  const executeUltimate = () => {
-    if (ultimateExecuting) return;
-    setUltimateExecuting(true);
-
+  // Execute ultimate logic with full cinematic sequence
+  const handleCinematicImpact = useCallback((attackerSide: "left" | "right") => {
     const damage = 30;
-    const executionId = "exec_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
-    processedUltimateExecutionsRef.current.add(executionId);
+    const isPlayerAttacking = attackerSide === "left";
+    const targetSide = isPlayerAttacking ? "right" : "left";
 
-    // Visuals/Audio locally
-    setPose("player", "special", 1500);
-    sfx.hitSpecial();
-    triggerShake(1.2);
-    setFlash("⚡ ULTIMATE EXECUTED ⚡");
-
-    // Spawn massive sparks / particle effects on opponent
-    for (let i = 0; i < 5; i++) {
+    // Spawn sparks & floating obliteration text on target
+    for (let i = 0; i < 6; i++) {
       setTimeout(() => {
-        addSpark("right", "var(--neon-pink)");
-        addFloat("CRITICAL HIT!", "right", "var(--neon-pink)", 36);
-      }, i * 200);
+        addSpark(targetSide, isPlayerAttacking ? "var(--neon-pink)" : "var(--neon-cyan)");
+        addFloat("CRITICAL OBLITERATION!", targetSide, isPlayerAttacking ? "var(--neon-pink)" : "var(--hp-red)", 36);
+      }, i * 140);
     }
 
-    // Apply damage and handle KO/Survival
-    setTimeout(() => {
+    if (isPlayerAttacking) {
       setEnemyHp(hp => {
         const next = Math.max(0, hp - damage);
         net.emit("opponent:hp", { hp: next, roomId: roomIdRef.current });
-        
         if (next <= 0) {
-          // KO sequence
           setEnemyPose("ko");
           setSlowmo(true);
           setFlash("K.O.");
@@ -514,19 +516,51 @@ export function FightGame() {
             setSlowmo(false);
             setFlash(null);
             handleRoundEnd("player");
-          }, 1200);
-        } else {
-          // Survive: exit ultimate mode, return to normal combat
-          setUltimateActive(false);
-          setUltimateOwner(null);
-          setUltimateExecuting(false);
-          setTyped("");
-          setCurrentMove(generateMove());
-          setFlash(null);
+          }, 1500);
         }
         return next;
       });
-    }, 1000);
+    } else {
+      setPlayerHp(hp => {
+        const next = Math.max(0, hp - damage);
+        net.emit("opponent:hp", { hp: next, roomId: roomIdRef.current });
+        if (next <= 0) {
+          setPlayerPose("ko");
+          setSlowmo(true);
+          setFlash("DEFEAT");
+          sfx.koFlash();
+          setTimeout(() => {
+            setSlowmo(false);
+            setFlash(null);
+            handleRoundEnd("opponent");
+          }, 1500);
+        }
+        return next;
+      });
+    }
+  }, [handleRoundEnd, addSpark, addFloat]);
+
+  const handleCinematicComplete = useCallback(() => {
+    setCinematicAttacker(null);
+    setUltimateActive(false);
+    setUltimateOwner(null);
+    setUltimateExecuting(false);
+    setTyped("");
+    setCurrentMove(generateMove());
+    setFlash(null);
+  }, []);
+
+  const executeUltimate = () => {
+    if (ultimateExecuting) return;
+    setUltimateExecuting(true);
+
+    const damage = 30;
+    const executionId = "exec_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+    processedUltimateExecutionsRef.current.add(executionId);
+
+    // Launch Cinematic Ultimate for Player (Left side)
+    setCinematicAttacker("left");
+    setPose("player", "special", 5000);
 
     // Broadcast execute
     net.emit("ultimate:execute", { 
@@ -933,49 +967,8 @@ export function FightGame() {
       processedUltimateExecutionsRef.current.add(executionId);
 
       setUltimateExecuting(true);
-      setPose("enemy", "special", 1500);
-      sfx.hitSpecial();
-      triggerShake(1.2);
-      setFlash("⚡ OPPONENT ULTIMATE! ⚡");
-
-      // Spawn massive particles / sparks on player side
-      for (let i = 0; i < 5; i++) {
-        setTimeout(() => {
-          addSpark("left", "var(--neon-cyan)");
-          addFloat("CRITICAL HIT!", "left", "var(--hp-red)", 36);
-        }, i * 200);
-      }
-
-      // Apply damage after the animation ends
-      setTimeout(() => {
-        setPlayerHp(hp => {
-          const next = Math.max(0, hp - damage);
-          net.emit("opponent:hp", { hp: next, roomId: roomIdRef.current });
-
-          if (next <= 0) {
-            // KO sequence
-            setPlayerPose("ko");
-            setSlowmo(true);
-            setFlash("DEFEAT");
-            sfx.koFlash();
-            setTimeout(() => {
-              setSlowmo(false);
-              setFlash(null);
-              handleRoundEnd("opponent");
-            }, 1200);
-          } else {
-            // Survived: exit ultimate mode, return to normal combat
-            setUltimateActive(false);
-            setUltimateOwner(null);
-            setUltimateExecuting(false);
-            setTyped("");
-            setCurrentMove(generateMove());
-            setFlash(null);
-          }
-
-          return next;
-        });
-      }, 1000);
+      setCinematicAttacker("right");
+      setPose("enemy", "special", 5000);
     });
 
     const offUltimateExpire = net.on("ultimate:expire", ({ roundId, ownerId, roomId: eventRoomId }) => {
@@ -1308,11 +1301,18 @@ export function FightGame() {
       <section className="relative z-10 mx-auto mt-10 flex h-[46vh] max-w-6xl items-end justify-between px-16">
         {/* Player */}
         <div className="relative">
-          <FighterSprite side="left" pose={playerPose} hurt={playerPose === "hurt"} color="oklch(0.35 0.2 260)" accent="var(--neon-cyan)" />
+          <FighterSprite
+            side="left"
+            pose={playerPose}
+            hurt={playerPose === "hurt"}
+            colorCycleIndex={cinematicAttacker === "left" ? colorCycleIndex : 0}
+            color="oklch(0.35 0.2 260)"
+            accent="var(--neon-cyan)"
+          />
         </div>
 
         {/* Center Ultimate Panel */}
-        {ultimateActive && (
+        {ultimateActive && !cinematicAttacker && (
           <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center z-30 pointer-events-none">
             <div className="px-10 py-8 border-4 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center animate-scale-up"
                  style={{
@@ -1374,6 +1374,16 @@ export function FightGame() {
           </div>
         )}
 
+        {/* Cinematic Ultimate Overlay */}
+        {cinematicAttacker && (
+          <UltimateCinematic
+            attackerSide={cinematicAttacker}
+            onExecuteImpact={() => handleCinematicImpact(cinematicAttacker)}
+            onComplete={handleCinematicComplete}
+            onCameraShake={triggerShake}
+          />
+        )}
+
         {/* Enemy */}
         <div className="relative">
           {enemyIncoming && !ultimateActive && (
@@ -1381,7 +1391,14 @@ export function FightGame() {
               ! {enemyIncoming.toUpperCase()} !
             </div>
           )}
-          <FighterSprite side="right" pose={enemyPose} hurt={enemyPose === "hurt"} color="oklch(0.3 0.18 20)" accent="var(--neon-pink)" />
+          <FighterSprite
+            side="right"
+            pose={enemyPose}
+            hurt={enemyPose === "hurt"}
+            colorCycleIndex={cinematicAttacker === "right" ? colorCycleIndex : 0}
+            color="oklch(0.3 0.18 20)"
+            accent="var(--neon-pink)"
+          />
         </div>
 
         {/* Floats */}

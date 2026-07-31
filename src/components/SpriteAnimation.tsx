@@ -17,6 +17,7 @@ interface SpriteAnimationProps {
   pose: FighterPose;
   side: "left" | "right";
   hurt: boolean;
+  colorCycleIndex?: number;
 }
 
 const POSE_MAP: Record<FighterPose, { row: number; col: number }> = {
@@ -32,7 +33,16 @@ const POSE_MAP: Record<FighterPose, { row: number; col: number }> = {
   hurt: { row: 2, col: 1 },
 };
 
-export function SpriteAnimation({ src, pose, side, hurt }: SpriteAnimationProps) {
+const SPECIAL_COLOR_FILTERS = [
+  "brightness(1) drop-shadow(0 0 16px #e024c3)",
+  "hue-rotate(60deg) brightness(1.4) drop-shadow(0 0 20px #9d26d0)",
+  "hue-rotate(180deg) brightness(1.4) drop-shadow(0 0 20px #00ffff)",
+  "brightness(10) drop-shadow(0 0 24px #ffffff)",
+  "brightness(0.1) drop-shadow(0 0 16px #00ffff)",
+  "brightness(1.2) drop-shadow(0 0 24px #ffcc00)",
+];
+
+export function SpriteAnimation({ src, pose, side, hurt, colorCycleIndex = 0 }: SpriteAnimationProps) {
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
@@ -60,6 +70,13 @@ export function SpriteAnimation({ src, pose, side, hurt }: SpriteAnimationProps)
   const flip = side === "right" ? -1 : 1;
   const opacity = pose === "ko" ? 0.6 : 1;
 
+  let activeFilter: string | undefined = undefined;
+  if (hurt) {
+    activeFilter = "hue-rotate(-40deg) brightness(1.6) drop-shadow(0 0 8px red)";
+  } else if (pose === "special") {
+    activeFilter = SPECIAL_COLOR_FILTERS[colorCycleIndex % SPECIAL_COLOR_FILTERS.length];
+  }
+
   return (
     <div
       className="relative flex flex-col items-center justify-end"
@@ -78,7 +95,7 @@ export function SpriteAnimation({ src, pose, side, hurt }: SpriteAnimationProps)
       />
       {/* Active Sprite Frame cropped from the sprite sheet */}
       <div
-        className="retro-sprite relative"
+        className="retro-sprite relative transition-all duration-75"
         style={{
           width: `${displayWidth}px`,
           height: `${displayHeight}px`,
@@ -87,7 +104,7 @@ export function SpriteAnimation({ src, pose, side, hurt }: SpriteAnimationProps)
           backgroundPosition: `-${col * displayWidth}px -${row * displayHeight}px`,
           backgroundRepeat: "no-repeat",
           transform: `scaleX(${flip})`,
-          filter: hurt ? "hue-rotate(-40deg) brightness(1.6) drop-shadow(0 0 8px red)" : undefined,
+          filter: activeFilter,
           opacity,
         }}
       />
