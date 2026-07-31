@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sfx, unlockAudio, setMuted, isMuted } from "@/lib/chiptune";
 import { net, type NetMove, generateRoomId } from "@/lib/net";
+import { SpriteAnimation } from "./SpriteAnimation";
 
 type MoveType = "punch" | "kick" | "block" | "dodge" | "aerial" | "special";
 type Fighter = "player" | "enemy";
@@ -73,104 +74,26 @@ function generateMove(forceSpecial = false): Move {
   return { type, word: pick(cfg.pool), damage: cfg.damage, label: cfg.label, color: cfg.color };
 }
 
-// ---------- Fighter SVG ----------
+// ---------- Fighter Sprite ----------
 function FighterSprite({
   side,
   pose,
   hurt,
-  color,
-  accent,
 }: {
   side: "left" | "right";
   pose: "idle" | "punch" | "kick" | "block" | "dodge" | "aerial" | "special" | "hurt" | "ko";
   hurt: boolean;
-  color: string;
-  accent: string;
+  color?: string;
+  accent?: string;
 }) {
-  const flip = side === "right" ? -1 : 1;
-  const armAngle =
-    pose === "punch" ? 90 :
-    pose === "aerial" ? 130 :
-    pose === "special" ? 110 :
-    pose === "block" ? -20 :
-    pose === "hurt" ? -60 :
-    30;
-  const legAngle =
-    pose === "kick" ? 80 :
-    pose === "aerial" ? 60 :
-    pose === "dodge" ? -30 : 10;
-  const yOffset = pose === "aerial" ? -60 : pose === "dodge" ? 10 : 0;
-  const xLean = pose === "hurt" ? -15 * flip : pose === "punch" ? 12 * flip : pose === "kick" ? 8 * flip : 0;
-  const opacity = pose === "ko" ? 0.5 : 1;
-
+  const spriteSrc = side === "left" ? "assets/sprites/player.png" : "assets/sprites/enemy.png";
   return (
-    <div
-      className="relative"
-      style={{
-        transform: `translate(${xLean}px, ${yOffset}px) scaleX(${flip})`,
-        transition: "transform 120ms ease-out",
-        filter: hurt ? "hue-rotate(-40deg) brightness(1.6)" : undefined,
-        opacity,
-      }}
-    >
-      <svg viewBox="-100 -180 200 200" width="220" height="260" style={{ overflow: "visible" }}>
-        {/* shadow */}
-        <ellipse cx="0" cy="15" rx="55" ry="8" fill="black" opacity="0.5" />
-        {/* back leg */}
-        <g transform={`translate(-8, -40) rotate(${-legAngle * 0.4})`}>
-          <rect x="-8" y="0" width="16" height="55" rx="6" fill={color} />
-          <rect x="-10" y="50" width="24" height="10" rx="3" fill={accent} />
-        </g>
-        {/* front leg */}
-        <g transform={`translate(10, -40) rotate(${legAngle})`}>
-          <rect x="-8" y="0" width="16" height="55" rx="6" fill={color} />
-          <rect x="-10" y="50" width="26" height="10" rx="3" fill={accent} />
-        </g>
-        {/* torso */}
-        <path d="M -28 -95 L 28 -95 L 34 -40 L -34 -40 Z" fill={color} />
-        <path d="M -28 -95 L 28 -95 L 20 -75 L -20 -75 Z" fill={accent} opacity="0.8" />
-        <rect x="-4" y="-95" width="8" height="55" fill={accent} opacity="0.6" />
-        {/* back arm */}
-        <g transform={`translate(-24, -90) rotate(${-armAngle * 0.5})`}>
-          <rect x="-7" y="0" width="14" height="45" rx="6" fill={color} opacity="0.85" />
-          <circle cx="0" cy="48" r="10" fill={accent} />
-        </g>
-        {/* head */}
-        <g transform={`translate(0, -115)`}>
-          <circle cx="0" cy="0" r="22" fill={color} />
-          <path d="M -22 -6 Q 0 -28 22 -6 L 20 -14 L -20 -14 Z" fill={accent} />
-          {/* visor */}
-          <rect x="-16" y="-4" width="32" height="8" rx="2" fill={accent} style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />
-          <rect x="-14" y="-3" width="6" height="6" fill="white" opacity="0.9" />
-        </g>
-        {/* front arm (attack arm) */}
-        <g transform={`translate(24, -90) rotate(${armAngle})`}>
-          <rect x="-7" y="0" width="14" height="45" rx="6" fill={color} />
-          <circle cx="0" cy="48" r="12" fill={accent} style={{ filter: `drop-shadow(0 0 8px ${accent})` }} />
-          {(pose === "punch" || pose === "special" || pose === "aerial") && (
-            <g transform="translate(0, 55)">
-              <path d="M -18 0 L 30 -6 L 30 6 Z" fill={accent} opacity="0.7" />
-              <path d="M -8 -12 L 24 -14 L 24 14 L -8 12 Z" fill="white" opacity="0.25" />
-            </g>
-          )}
-        </g>
-        {/* block shield */}
-        {pose === "block" && (
-          <g>
-            <rect x="20" y="-100" width="14" height="70" rx="6" fill={accent} opacity="0.85" style={{ filter: `drop-shadow(0 0 12px ${accent})` }} />
-          </g>
-        )}
-        {/* special charge */}
-        {pose === "special" && (
-          <>
-            <circle cx="60" cy="-70" r="26" fill={accent} opacity="0.3">
-              <animate attributeName="r" values="18;32;18" dur="0.6s" repeatCount="indefinite" />
-            </circle>
-            <circle cx="60" cy="-70" r="14" fill="white" opacity="0.9" />
-          </>
-        )}
-      </svg>
-    </div>
+    <SpriteAnimation
+      src={spriteSrc}
+      pose={pose}
+      side={side}
+      hurt={hurt}
+    />
   );
 }
 

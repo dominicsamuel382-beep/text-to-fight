@@ -182,3 +182,10 @@
     color: var(--color-foreground);
   }
 }
+
+.retro-sprite {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: -webkit-optimize-contrast;
+}
