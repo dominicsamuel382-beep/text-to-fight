@@ -1,22 +1,35 @@
 import React, { useState, useEffect } from "react";
 
+export type FighterPose =
+  | "idle"
+  | "punch"
+  | "kick"
+  | "block"
+  | "dodge"
+  | "aerial"
+  | "special"
+  | "dash"
+  | "hurt"
+  | "ko";
+
 interface SpriteAnimationProps {
   src: string;
-  pose: "idle" | "punch" | "kick" | "block" | "dodge" | "aerial" | "special" | "hurt" | "ko";
+  pose: FighterPose;
   side: "left" | "right";
   hurt: boolean;
 }
 
-const POSE_MAP: Record<string, { row: number; col: number }> = {
+const POSE_MAP: Record<FighterPose, { row: number; col: number }> = {
   idle: { row: 0, col: 0 },
   punch: { row: 0, col: 1 },
   kick: { row: 0, col: 2 },
   block: { row: 1, col: 0 },
   dodge: { row: 1, col: 1 },
   aerial: { row: 1, col: 2 },
-  hurt: { row: 2, col: 0 },
-  special: { row: 2, col: 1 },
+  special: { row: 2, col: 0 },
+  dash: { row: 2, col: 1 },
   ko: { row: 2, col: 2 },
+  hurt: { row: 2, col: 1 },
 };
 
 export function SpriteAnimation({ src, pose, side, hurt }: SpriteAnimationProps) {

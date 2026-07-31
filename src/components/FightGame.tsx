@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sfx, unlockAudio, setMuted, isMuted } from "@/lib/chiptune";
 import { net, type NetMove, generateRoomId } from "@/lib/net";
-import { SpriteAnimation } from "./SpriteAnimation";
+import { SpriteAnimation, type FighterPose } from "./SpriteAnimation";
 
-type MoveType = "punch" | "kick" | "block" | "dodge" | "aerial" | "special";
+type MoveType = "punch" | "kick" | "block" | "dodge" | "dash" | "aerial" | "special";
 type Fighter = "player" | "enemy";
 
 interface Move {
@@ -39,6 +39,7 @@ const MOVES: Record<MoveType, { label: string; color: string; damage: number; po
   kick:    { label: "KICK",     color: "var(--neon-yellow)", damage: 9,  pool: WORDS_SHORT },
   block:   { label: "BLOCK",    color: "var(--neon-cyan)",   damage: 0,  pool: ["guard", "block", "shield"] },
   dodge:   { label: "DODGE",    color: "var(--neon-purple)", damage: 0,  pool: ["dodge", "evade", "roll"] },
+  dash:    { label: "DASH",     color: "var(--neon-cyan)",   damage: 5,  pool: ["dash", "rush", "slide"] },
   aerial:  { label: "AERIAL",   color: "var(--neon-pink)",   damage: 14, pool: WORDS_MED },
   special: { label: "SPECIAL",  color: "var(--neon-pink)",   damage: 28, pool: WORDS_LONG },
 };
@@ -65,10 +66,11 @@ function generateMove(forceSpecial = false): Move {
   }
   const roll = Math.random();
   let type: MoveType;
-  if (roll < 0.35) type = "punch";
-  else if (roll < 0.6) type = "kick";
-  else if (roll < 0.75) type = "aerial";
-  else if (roll < 0.87) type = "block";
+  if (roll < 0.30) type = "punch";
+  else if (roll < 0.50) type = "kick";
+  else if (roll < 0.65) type = "dash";
+  else if (roll < 0.80) type = "aerial";
+  else if (roll < 0.90) type = "block";
   else type = "dodge";
   const cfg = MOVES[type];
   return { type, word: pick(cfg.pool), damage: cfg.damage, label: cfg.label, color: cfg.color };
@@ -81,7 +83,7 @@ function FighterSprite({
   hurt,
 }: {
   side: "left" | "right";
-  pose: "idle" | "punch" | "kick" | "block" | "dodge" | "aerial" | "special" | "hurt" | "ko";
+  pose: FighterPose;
   hurt: boolean;
   color?: string;
   accent?: string;
@@ -114,32 +116,66 @@ function HealthBar({
   meter: number;
 }) {
   const pct = Math.max(0, hp) / max * 100;
-  const color = pct > 60 ? "var(--hp-green)" : pct > 30 ? "var(--hp-orange)" : "var(--hp-red)";
+  const labelColor = side === "left" ? "var(--neon-cyan)" : "var(--hp-red)";
+  
   return (
-    <div className={`flex-1 ${side === "right" ? "items-end text-right" : "items-start"} flex flex-col gap-1`}>
-      <div className={`flex items-center gap-3 ${side === "right" ? "flex-row-reverse" : ""}`}>
-        <div className="text-2xl font-black tracking-widest" style={{ color: "var(--neon-cyan)", textShadow: "0 0 8px currentColor" }}>{label}</div>
-        <div className="text-xs font-mono opacity-70">COMBO x{combo}</div>
+    <div className={`flex-1 flex flex-col gap-1.5 ${side === "right" ? "items-end" : "items-start"}`}>
+      {/* Label and Combo Row */}
+      <div className={`flex items-baseline gap-3 ${side === "right" ? "flex-row" : "flex-row"}`}>
+        <div
+          className="text-2xl font-black tracking-wider uppercase"
+          style={{ color: labelColor, textShadow: `0 0 10px ${labelColor}` }}
+        >
+          {label}
+        </div>
+        <div className="text-xs font-mono text-white/80 tracking-wider">
+          COMBO x{combo}
+        </div>
       </div>
-      <div className="relative w-full h-6 border-2" style={{ borderColor: "var(--neon-cyan)", background: "rgba(0,0,0,0.6)", boxShadow: "0 0 12px var(--neon-cyan) inset" }}>
+
+      {/* Segmented Pixel Health Bar */}
+      <div
+        className="relative w-full h-7 border-2 overflow-hidden"
+        style={{
+          borderColor: side === "left" ? "var(--neon-cyan)" : "var(--neon-pink)",
+          background: "rgba(5, 5, 12, 0.95)",
+          boxShadow: `0 0 12px ${side === "left" ? "rgba(0,255,255,0.3)" : "rgba(224,36,195,0.3)"}`,
+        }}
+      >
+        {/* Lime Green Pixel Health Fill */}
         <div
           className="absolute top-0 h-full transition-all duration-300"
           style={{
             width: `${pct}%`,
             [side === "right" ? "right" : "left"]: 0,
-            background: `linear-gradient(90deg, ${color}, oklch(0.98 0.05 95))`,
-            boxShadow: `0 0 16px ${color}`,
+            background: "linear-gradient(180deg, #40ff00 0%, #2bd000 100%)",
+            boxShadow: "0 0 12px #39ff14",
           }}
         />
-        <div className="absolute inset-0 opacity-20" style={{ background: "repeating-linear-gradient(90deg, transparent 0 8px, black 8px 9px)" }} />
+        {/* Pixel Block Grid Dividers */}
+        <div
+          className="absolute inset-0 pointer-events-none opacity-90"
+          style={{
+            background: "repeating-linear-gradient(90deg, transparent 0px, transparent 10px, rgba(0,0,0,0.9) 10px, rgba(0,0,0,0.9) 12px)",
+          }}
+        />
       </div>
-      <div className="relative w-2/3 h-2 border" style={{ borderColor: "var(--neon-pink)", background: "rgba(0,0,0,0.6)" }}>
+
+      {/* Meter Bar */}
+      <div
+        className="relative w-[92%] h-2.5 border overflow-hidden mt-0.5"
+        style={{
+          borderColor: "var(--neon-pink)",
+          background: "rgba(5, 5, 12, 0.85)",
+          boxShadow: "0 0 8px rgba(224, 36, 195, 0.3)",
+        }}
+      >
         <div
           className="absolute top-0 h-full transition-all duration-200"
           style={{
             width: `${meter}%`,
             [side === "right" ? "right" : "left"]: 0,
-            background: "linear-gradient(90deg, var(--neon-pink), var(--neon-yellow))",
+            background: "linear-gradient(90deg, var(--neon-purple), var(--neon-pink))",
             boxShadow: "0 0 10px var(--neon-pink)",
           }}
         />
@@ -198,8 +234,8 @@ export function FightGame() {
 
   const [currentMove, setCurrentMove] = useState<Move>(() => generateMove());
   const [typed, setTyped] = useState("");
-  const [playerPose, setPlayerPose] = useState<"idle" | MoveType | "hurt" | "ko">("idle");
-  const [enemyPose, setEnemyPose] = useState<"idle" | MoveType | "hurt" | "ko">("idle");
+  const [playerPose, setPlayerPose] = useState<FighterPose>("idle");
+  const [enemyPose, setEnemyPose] = useState<FighterPose>("idle");
   const [enemyIncoming, setEnemyIncoming] = useState<MoveType | null>(null);
   const [enemyCombo, setEnemyCombo] = useState(0);
   const [enemyMeter, setEnemyMeter] = useState(0);
@@ -291,7 +327,7 @@ export function FightGame() {
     setTimeout(() => setShake(0), 350);
   }, []);
 
-  const setPose = useCallback((who: Fighter, pose: MoveType | "hurt" | "idle" | "ko", ms = 300) => {
+  const setPose = useCallback((who: Fighter, pose: FighterPose, ms = 300) => {
     if (who === "player") {
       setPlayerPose(pose);
       if (poseTimerRef.current) window.clearTimeout(poseTimerRef.current);
@@ -1234,14 +1270,14 @@ export function FightGame() {
       <ArenaBackdrop />
 
       {/* Top HUD */}
-      <header className="relative z-20 px-6 pt-5">
+      <header className="relative z-20 px-8 pt-5 max-w-7xl mx-auto w-full">
         <button
           onClick={toggleMute}
-          className="absolute right-6 top-5 z-30 text-[10px] tracking-[0.3em] border px-2 py-1 hover:opacity-100 opacity-70"
+          className="absolute right-8 top-5 z-30 text-[10px] tracking-[0.3em] border px-2 py-1 hover:opacity-100 opacity-70 cursor-pointer"
           style={{ borderColor: "var(--neon-cyan)", color: "var(--neon-cyan)", background: "rgba(0,0,0,0.6)" }}
           aria-label={audioMuted ? "Unmute" : "Mute"}
         >{audioMuted ? "SOUND OFF" : "SOUND ON"}</button>
-        <div className="flex items-center justify-between gap-6">
+        <div className="flex items-center justify-between gap-8">
           <HealthBar
             hp={playerHp}
             max={100}
@@ -1250,17 +1286,17 @@ export function FightGame() {
             combo={combo}
             meter={meter}
           />
-          <div className="flex flex-col items-center px-3 min-w-[140px]">
-            <div className="text-[10px] tracking-[0.3em] opacity-70">ROUND {round}</div>
-            <div className="text-3xl font-black mt-1" style={{ color: "var(--neon-yellow)", textShadow: "0 0 12px var(--neon-yellow)" }}>
-              {playerRoundWins} — {opponentRoundWins}
+          <div className="flex flex-col items-center px-4 shrink-0">
+            <div className="text-xs font-bold tracking-[0.25em]" style={{ color: "var(--neon-yellow)" }}>ROUND {round}</div>
+            <div className="text-4xl md:text-5xl font-black mt-0.5 tracking-widest" style={{ color: "var(--neon-yellow)", textShadow: "0 0 14px rgba(255, 204, 0, 0.6)" }}>
+              {playerRoundWins} - {opponentRoundWins}
             </div>
-            <div className="text-[9px] tracking-[0.2em] opacity-60 mt-1">BEST OF 3</div>
+            <div className="text-[10px] tracking-[0.2em] opacity-60 mt-0.5">BEST OF 3</div>
           </div>
           <HealthBar
             hp={enemyHp}
             max={100}
-            label="OPP"
+            label="OPPONENT"
             side="right"
             combo={enemyCombo}
             meter={enemyMeter}
@@ -1440,12 +1476,23 @@ export function FightGame() {
             />
           </div>
         ) : (
-          <div className="mx-auto max-w-4xl border-2 p-4" style={{ borderColor: currentMove.color, background: "rgba(0,0,0,0.65)", boxShadow: `0 0 24px ${currentMove.color}` }}>
-            <div className="flex items-center justify-between text-xs tracking-[0.3em] opacity-80">
-              <span style={{ color: currentMove.color, textShadow: "0 0 8px currentColor" }}>▶ {currentMove.label}</span>
-              <span>DMG {currentMove.damage} · COMBO x{combo} · BEST {best}</span>
+          <div
+            className="mx-auto max-w-4xl border-2 px-6 py-4"
+            style={{
+              borderColor: "var(--neon-pink)",
+              background: "rgba(8, 6, 18, 0.93)",
+              boxShadow: "0 0 24px rgba(224, 36, 195, 0.35)",
+            }}
+          >
+            <div className="flex items-center justify-between text-xs tracking-[0.25em] font-mono">
+              <span className="font-bold text-sm flex items-center gap-1.5" style={{ color: "var(--neon-pink)", textShadow: "0 0 8px var(--neon-pink)" }}>
+                <span className="text-[10px]">▶</span> {currentMove.label}
+              </span>
+              <span className="text-white/80">
+                DMG {currentMove.damage} · COMBO x{combo} · BEST {best}
+              </span>
             </div>
-            <div className="mt-3 flex items-center gap-2 text-4xl md:text-5xl font-black tracking-[0.15em]">
+            <div className="mt-3 my-2 flex items-center justify-start gap-4 text-4xl md:text-5xl font-black tracking-[0.35em] text-white">
               {currentMove.word.split("").map((ch, i) => {
                 const done = i < typed.length;
                 const current = i === typed.length;
@@ -1453,9 +1500,8 @@ export function FightGame() {
                   <span
                     key={i}
                     style={{
-                      color: done ? currentMove.color : current ? "white" : "rgba(255,255,255,0.35)",
-                      textShadow: done ? `0 0 12px ${currentMove.color}` : current ? "0 0 8px white" : undefined,
-                      borderBottom: current ? `3px solid ${currentMove.color}` : undefined,
+                      color: done ? "var(--neon-pink)" : current ? "#ffffff" : "rgba(255,255,255,0.9)",
+                      textShadow: done ? "0 0 14px var(--neon-pink)" : current ? "0 0 10px #ffffff" : undefined,
                     }}
                   >
                     {ch.toUpperCase()}
@@ -1463,8 +1509,16 @@ export function FightGame() {
                 );
               })}
             </div>
-            <div className="mt-3 h-1 w-full" style={{ background: "rgba(255,255,255,0.1)" }}>
-              <div className="h-full transition-all duration-100" style={{ width: `${progress}%`, background: currentMove.color, boxShadow: `0 0 10px ${currentMove.color}` }} />
+            {/* Dashed track progress line */}
+            <div className="relative mt-4 w-full h-[3px] overflow-hidden" style={{ background: "repeating-linear-gradient(90deg, rgba(255,255,255,0.2) 0px, rgba(255,255,255,0.2) 8px, transparent 8px, transparent 14px)" }}>
+              <div
+                className="h-full transition-all duration-100"
+                style={{
+                  width: `${progress}%`,
+                  background: "var(--neon-pink)",
+                  boxShadow: "0 0 10px var(--neon-pink)",
+                }}
+              />
             </div>
             <input
               ref={inputRef}
@@ -1477,8 +1531,16 @@ export function FightGame() {
             />
           </div>
         )}
-        <p className="text-center text-xs opacity-60 mt-3 tracking-widest">
-          {ultimateActive ? "TYPING COMBAT FROZEN · COMPLETE THE KEYSTREAM" : "TYPE THE WORD TO ATTACK · BLOCK/DODGE WHEN OPPONENT WINDS UP"}
+        <p className="text-center text-xs opacity-90 mt-4 tracking-widest font-mono">
+          {ultimateActive ? (
+            "TYPING COMBAT FROZEN · COMPLETE THE KEYSTREAM"
+          ) : (
+            <>
+              TYPE THE WORD TO <span style={{ color: "var(--neon-yellow)", fontWeight: "bold" }}>ATTACK</span>
+              <span className="opacity-50"> · </span>
+              <span style={{ color: "var(--neon-cyan)", fontWeight: "bold" }}>BLOCK/DODGE</span> WHEN OPPONENT WINDS UP
+            </>
+          )}
         </p>
       </footer>
 
@@ -1713,63 +1775,41 @@ function Overlay({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Neon cyberpunk arena background
+// Cyberpunk street alley arena background using custom image
 function ArenaBackdrop() {
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none">
-      {/* sun */}
-      <div className="absolute left-1/2 top-[8%] -translate-x-1/2 w-[520px] h-[520px] rounded-full opacity-70"
+      {/* User background image */}
+      <img
+        src="assets/background.jpg"
+        alt="Arena Background"
+        className="absolute inset-0 w-full h-full object-cover object-center retro-sprite"
+      />
+
+
+
+      {/* Atmospheric lighting gradient overlay to maintain UI contrast & game atmosphere */}
+      <div
+        className="absolute inset-0"
         style={{
-          background: "radial-gradient(circle, oklch(0.85 0.22 30) 0%, oklch(0.6 0.28 340) 40%, transparent 70%)",
-          filter: "blur(2px)",
-        }} />
-      {/* stripes on sun */}
-      <div className="absolute left-1/2 top-[24%] -translate-x-1/2 w-[400px] h-[300px] opacity-60"
+          background: "linear-gradient(to bottom, rgba(8, 4, 18, 0.4) 0%, rgba(5, 5, 12, 0.15) 50%, rgba(8, 4, 20, 0.7) 100%)",
+        }}
+      />
+      {/* Subtle CRT scanline effect overlay */}
+      <div
+        className="absolute inset-0 opacity-15"
         style={{
-          background: "repeating-linear-gradient(0deg, transparent 0 18px, black 18px 26px)",
-          maskImage: "radial-gradient(circle at 50% 30%, black 40%, transparent 65%)",
-          WebkitMaskImage: "radial-gradient(circle at 50% 30%, black 40%, transparent 65%)",
-        }} />
-      {/* skyline */}
-      <div className="absolute inset-x-0 top-[38%] h-[22%] opacity-80"
+          backgroundImage: "linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.5) 50%)",
+          backgroundSize: "100% 4px",
+        }}
+      />
+      {/* Vignette border */}
+      <div
+        className="absolute inset-0"
         style={{
-          background: `
-            linear-gradient(to top, oklch(0.1 0.05 280) 0%, transparent 100%),
-            repeating-linear-gradient(90deg,
-              oklch(0.18 0.08 290) 0 40px, oklch(0.14 0.06 280) 40px 44px,
-              oklch(0.2 0.1 300) 44px 88px, oklch(0.12 0.05 270) 88px 92px,
-              oklch(0.16 0.08 320) 92px 150px, oklch(0.1 0.04 260) 150px 158px)
-          `,
-          clipPath: "polygon(0 30%, 4% 30%, 4% 20%, 10% 20%, 10% 10%, 16% 10%, 16% 25%, 22% 25%, 22% 5%, 28% 5%, 28% 20%, 36% 20%, 36% 12%, 44% 12%, 44% 30%, 52% 30%, 52% 8%, 60% 8%, 60% 22%, 68% 22%, 68% 15%, 76% 15%, 76% 5%, 84% 5%, 84% 25%, 92% 25%, 92% 18%, 100% 18%, 100% 100%, 0 100%)",
-        }} />
-      {/* neon window dots */}
-      <div className="absolute inset-x-0 top-[42%] h-[18%] opacity-70"
-        style={{
-          backgroundImage: "radial-gradient(oklch(0.9 0.25 200) 1px, transparent 2px), radial-gradient(oklch(0.85 0.25 340) 1px, transparent 2px)",
-          backgroundSize: "18px 24px, 22px 30px",
-          backgroundPosition: "0 0, 6px 12px",
-          maskImage: "linear-gradient(to bottom, transparent 0%, black 30%, black 70%, transparent 100%)",
-          WebkitMaskImage: "linear-gradient(to bottom, transparent 0%, black 30%, black 70%, transparent 100%)",
-        }} />
-      {/* grid floor */}
-      <div className="absolute inset-x-0 bottom-0 h-[38%]" style={{ perspective: "600px" }}>
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage: `
-              linear-gradient(oklch(0.85 0.25 200 / 0.6) 1px, transparent 1px),
-              linear-gradient(90deg, oklch(0.85 0.25 340 / 0.5) 1px, transparent 1px)
-            `,
-            backgroundSize: "60px 40px, 60px 40px",
-            transform: "rotateX(65deg)",
-            transformOrigin: "bottom",
-            animation: "scanline 1.2s linear infinite",
-          }}
-        />
-        <div className="absolute inset-0" style={{ background: "linear-gradient(to top, oklch(0.1 0.05 280) 20%, transparent 100%)" }} />
-      </div>
-      {/* vignette */}
-      <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.7) 100%)" }} />
+          background: "radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.75) 100%)",
+        }}
+      />
     </div>
   );
 }
