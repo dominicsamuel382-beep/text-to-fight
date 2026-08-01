@@ -1300,7 +1300,7 @@ export function FightGame() {
       {/* Stage */}
       <section className="relative z-10 mx-auto mt-10 flex h-[46vh] max-w-6xl items-end justify-between px-16">
         {/* Player */}
-        <div className="relative">
+        <div className="relative z-20">
           <FighterSprite
             side="left"
             pose={playerPose}
@@ -1385,7 +1385,7 @@ export function FightGame() {
         )}
 
         {/* Enemy */}
-        <div className="relative">
+        <div className="relative z-20">
           {enemyIncoming && !ultimateActive && (
             <div className="absolute -top-8 right-1/2 translate-x-1/2 text-xs font-bold px-2 py-1 border" style={{ borderColor: "var(--neon-pink)", color: "var(--neon-pink)", background: "rgba(0,0,0,0.6)" }}>
               ! {enemyIncoming.toUpperCase()} !
