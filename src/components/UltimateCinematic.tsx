@@ -375,7 +375,7 @@ function BeamPhase({ isLeft, phase }: { isLeft: boolean; phase: string }) {
 
       {/* Erupting Plasma Origin Sphere at Attacker's Hands */}
       <div
-        className="absolute top-[56%] -translate-y-1/2 -translate-x-1/2 w-[160px] h-[160px] rounded-full mix-blend-screen z-40 animate-ping"
+        className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-[160px] h-[160px] rounded-full mix-blend-screen z-40 animate-ping"
         style={{
           left: originX,
           background:
@@ -386,7 +386,7 @@ function BeamPhase({ isLeft, phase }: { isLeft: boolean; phase: string }) {
 
       {/* Layer 1: Outer Purple Energy Aura with Smooth Top/Bottom Linear Fade */}
       <div
-        className="absolute top-[56%] -translate-y-1/2 h-[240px] pointer-events-none mix-blend-screen z-20 animate-pulse"
+        className="absolute top-1/2 -translate-y-1/2 h-[240px] pointer-events-none mix-blend-screen z-20 animate-pulse"
         style={{
           left: isLeft ? "14%" : "0%",
           right: isLeft ? "0%" : "14%",
@@ -402,7 +402,7 @@ function BeamPhase({ isLeft, phase }: { isLeft: boolean; phase: string }) {
 
       {/* Layer 2: Condensed White-Hot Plasma Core Laser Beam */}
       <div
-        className="absolute top-[56%] -translate-y-1/2 h-[140px] pointer-events-none flex items-center mix-blend-screen z-30"
+        className="absolute top-1/2 -translate-y-1/2 h-[140px] pointer-events-none flex items-center mix-blend-screen z-30"
         style={{
           left: isLeft ? "20%" : "5%",
           right: isLeft ? "5%" : "20%",
@@ -458,7 +458,7 @@ function ImpactPhase({
 
       {/* Layered Multi-Ring Shockwaves & Explosive Burst */}
       <div
-        className="absolute top-[56%] -translate-y-1/2 flex items-center justify-center z-40"
+        className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center z-40"
         style={{
           left: `${targetXPercent}%`,
           transform: "translate(-50%, -50%)",
