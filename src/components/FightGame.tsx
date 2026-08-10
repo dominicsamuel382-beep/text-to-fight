@@ -928,7 +928,7 @@ export function FightGame() {
         matchEndedRef.current = true;
         setTimeout(() => {
           setRoundTransitionOverlay(null);
-          const amIMatchWinner = matchWinnerId === myId;
+          const amIMatchWinner = matchWinnerId === myRole;
           if (amIMatchWinner) {
             setPhase("victory");
           } else {
