@@ -1168,6 +1168,8 @@ export function FightGame() {
     sfx.select();
     setRoomError(null);
     setIsJoining(true);
+    matchedRef.current = false;
+    acceptedPeerRef.current = null;
 
     net.subscribeRoom(id);
     net.connect();
@@ -1218,6 +1220,8 @@ export function FightGame() {
     setRoomError(null);
     setIsJoining(false);
     setIsHost(false);
+    matchedRef.current = false;
+    acceptedPeerRef.current = null;
     if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
     
     // Reset match states
