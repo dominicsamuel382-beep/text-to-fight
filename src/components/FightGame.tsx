@@ -271,6 +271,8 @@ export function FightGame() {
   const roomIdRef = useRef(roomId);
   const windupSentRef = useRef(false);
   const joinTimeoutRef = useRef<number | null>(null);
+  const acceptedPeerRef = useRef<string | null>(null);
+  const matchedRef = useRef(false);
 
   const roundRef = useRef(round);
   const playerRoundWinsRef = useRef(playerRoundWins);
