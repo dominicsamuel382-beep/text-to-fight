@@ -441,14 +441,12 @@ export function FightGame() {
       const matchOver = newPlayerWins >= 2 || newOpponentWins >= 2;
       let matchWinnerId: string | undefined = undefined;
       if (matchOver) {
-        matchWinnerId = newPlayerWins >= 2 ? net.getId() : "opponent";
+        matchWinnerId = newPlayerWins >= 2 ? "host" : "guest";
       }
 
-      // Determine authoritative IDs
-      const hostId = net.getId();
-      const guestId = "opponent";
-      const winnerId = winner === "player" ? hostId : guestId;
-      const loserId = winner === "player" ? guestId : hostId;
+      // Determine authoritative roles (role-based so both clients interpret correctly)
+      const winnerId = winner === "player" ? "host" : "guest";
+      const loserId = winner === "player" ? "guest" : "host";
 
       // Broadcast authoritative result
       net.emit("round:result", {
@@ -895,8 +893,8 @@ export function FightGame() {
       // Lock gameplay input
       setPhase("ready");
 
-      const myId = net.getId();
-      const didIWin = winnerId === myId;
+      const myRole = isHostRef.current ? "host" : "guest";
+      const didIWin = winnerId === myRole;
       const roundWinnerLabel = didIWin ? "player" : "opponent";
 
       // Play sound effects
@@ -930,7 +928,7 @@ export function FightGame() {
         matchEndedRef.current = true;
         setTimeout(() => {
           setRoundTransitionOverlay(null);
-          const amIMatchWinner = matchWinnerId === myId;
+          const amIMatchWinner = matchWinnerId === myRole;
           if (amIMatchWinner) {
             setPhase("victory");
           } else {
