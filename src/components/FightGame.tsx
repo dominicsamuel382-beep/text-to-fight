@@ -441,14 +441,12 @@ export function FightGame() {
       const matchOver = newPlayerWins >= 2 || newOpponentWins >= 2;
       let matchWinnerId: string | undefined = undefined;
       if (matchOver) {
-        matchWinnerId = newPlayerWins >= 2 ? net.getId() : "opponent";
+        matchWinnerId = newPlayerWins >= 2 ? "host" : "guest";
       }
 
-      // Determine authoritative IDs
-      const hostId = net.getId();
-      const guestId = "opponent";
-      const winnerId = winner === "player" ? hostId : guestId;
-      const loserId = winner === "player" ? guestId : hostId;
+      // Determine authoritative roles (role-based so both clients interpret correctly)
+      const winnerId = winner === "player" ? "host" : "guest";
+      const loserId = winner === "player" ? "guest" : "host";
 
       // Broadcast authoritative result
       net.emit("round:result", {
