@@ -271,6 +271,8 @@ export function FightGame() {
   const roomIdRef = useRef(roomId);
   const windupSentRef = useRef(false);
   const joinTimeoutRef = useRef<number | null>(null);
+  const acceptedPeerRef = useRef<string | null>(null);
+  const matchedRef = useRef(false);
 
   const roundRef = useRef(round);
   const playerRoundWinsRef = useRef(playerRoundWins);
@@ -759,6 +761,7 @@ export function FightGame() {
       if (reqRoomId.trim().toUpperCase() !== currentRoomId.trim().toUpperCase()) return;
 
       if (currentPhase === "hosting") {
+        acceptedPeerRef.current = senderId;
         // Room has space — accept joiner & start match
         net.emit("room:accept", {
           roomId: currentRoomId,
@@ -767,6 +770,15 @@ export function FightGame() {
         });
         beginCountdown();
       } else if (currentPhase === "ready" || currentPhase === "fight") {
+        // Duplicate/retry request from the player we already accepted — re-confirm, not "full"
+        if (acceptedPeerRef.current && senderId === acceptedPeerRef.current) {
+          net.emit("room:accept", {
+            roomId: currentRoomId,
+            hostId: net.getId(),
+            targetId: senderId,
+          });
+          return;
+        }
         // Room is already full (strictly 1v1)
         net.emit("room:full", {
           roomId: currentRoomId,
@@ -781,17 +793,23 @@ export function FightGame() {
       if (targetId && myId && targetId !== myId) return;
 
       if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
+      matchedRef.current = true;
       setIsJoining(false);
       setRoomId(acceptedRoomId);
       roomIdRef.current = acceptedRoomId;
       setRoomError(null);
-      beginCountdown();
+      if (phaseRef.current === "lobby" || phaseRef.current === "menu" || phaseRef.current === "hosting") {
+        beginCountdown();
+      }
     });
 
     // Joiner receives room full error from host
     const offFull = net.on("room:full", ({ targetId }) => {
       const myId = net.getId();
       if (targetId && myId && targetId !== myId) return;
+      // Already in a match (or already accepted) — ignore stale "full" replies to retries
+      if (matchedRef.current) return;
+      if (phaseRef.current !== "lobby") return;
 
       if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
       setIsJoining(false);
@@ -1150,6 +1168,8 @@ export function FightGame() {
     sfx.select();
     setRoomError(null);
     setIsJoining(true);
+    matchedRef.current = false;
+    acceptedPeerRef.current = null;
 
     net.subscribeRoom(id);
     net.connect();
@@ -1200,6 +1220,8 @@ export function FightGame() {
     setRoomError(null);
     setIsJoining(false);
     setIsHost(false);
+    matchedRef.current = false;
+    acceptedPeerRef.current = null;
     if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
     
     // Reset match states
