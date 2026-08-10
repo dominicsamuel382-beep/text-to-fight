@@ -893,8 +893,8 @@ export function FightGame() {
       // Lock gameplay input
       setPhase("ready");
 
-      const myId = net.getId();
-      const didIWin = winnerId === myId;
+      const myRole = isHostRef.current ? "host" : "guest";
+      const didIWin = winnerId === myRole;
       const roundWinnerLabel = didIWin ? "player" : "opponent";
 
       // Play sound effects
